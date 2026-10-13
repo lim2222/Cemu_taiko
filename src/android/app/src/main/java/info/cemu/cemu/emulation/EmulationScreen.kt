@@ -68,6 +68,8 @@ import info.cemu.cemu.R
 import info.cemu.cemu.common.android.display.DisplayUtils
 import info.cemu.cemu.common.settings.HotkeyAction
 import info.cemu.cemu.common.settings.MAX_SCREENS_GAP
+import info.cemu.cemu.common.settings.MAX_SCREENS_Y_OFFSET
+import info.cemu.cemu.common.settings.MIN_SCREENS_Y_OFFSET
 import info.cemu.cemu.common.settings.ScreenOrientationMode
 import info.cemu.cemu.common.settings.ScreensLayout
 import info.cemu.cemu.common.settings.inputOverlayAlphaKey
@@ -160,6 +162,10 @@ fun EmulationScreen(
 
     val screensGap = perGameDisplaySettings?.screensGap
         ?: globalDisplaySettings.screensGap
+
+    // Vertical offset of the screens in portrait only, so the landscape arrangement is unaffected.
+    val screensYOffsetPortrait = perGameDisplaySettings?.screensYOffsetPortrait
+        ?: globalDisplaySettings.screensYOffsetPortrait
 
     // Whether the GamePad screen is shown. It is stored per game and per orientation, like the
     // TV/GamePad layout, because a screen that is hidden in portrait (where both would not fit)
@@ -284,6 +290,11 @@ fun EmulationScreen(
                         },
                         screensGap = screensGap,
                         onScreensGapChanged = { viewModel.setScreensGap(it) },
+                        isPortrait = isPortrait,
+                        screensYOffsetPortrait = screensYOffsetPortrait,
+                        onScreensYOffsetPortraitChanged = {
+                            viewModel.setScreensYOffsetPortrait(it)
+                        },
                         isPadVisible = isPadVisible,
                         onPadVisibleChanged = { viewModel.setPadVisible(isPortrait, it) },
                         onControllerTypeChanged = { controllerType ->
@@ -338,6 +349,7 @@ fun EmulationScreen(
                 isEmulationInitialized = isEmulationInitialized,
                 screensLayout = screensLayout,
                 screensGap = screensGap,
+                screensYOffsetPercent = if (isPortrait) screensYOffsetPortrait else 0,
                 isPadVisible = isPadVisible,
                 targetAspectRatio = targetAspectRatio,
             )
@@ -569,6 +581,9 @@ private fun EmulationSideMenuContent(
     onScreensLayoutChanged: (ScreensLayout) -> Unit,
     screensGap: Int,
     onScreensGapChanged: (Int) -> Unit,
+    isPortrait: Boolean,
+    screensYOffsetPortrait: Int,
+    onScreensYOffsetPortraitChanged: (Int) -> Unit,
     isPadVisible: Boolean,
     onPadVisibleChanged: (Boolean) -> Unit,
     onControllerTypeChanged: (Int) -> Unit,
@@ -616,6 +631,16 @@ private fun EmulationSideMenuContent(
         valueTo = MAX_SCREENS_GAP,
         labelFormatter = { "$it%" },
         onValueChange = onScreensGapChanged,
+    )
+
+    Slider(
+        label = tr("Portrait Y offset"),
+        value = screensYOffsetPortrait,
+        valueFrom = MIN_SCREENS_Y_OFFSET,
+        valueTo = MAX_SCREENS_Y_OFFSET,
+        labelFormatter = { "$it%" },
+        onValueChange = onScreensYOffsetPortraitChanged,
+        enabled = isPortrait,
     )
 
     CheckboxItem(
@@ -765,6 +790,7 @@ private fun EmulationSurfaces(
     isEmulationInitialized: Boolean,
     screensLayout: ScreensLayout,
     screensGap: Int,
+    screensYOffsetPercent: Int,
     isPadVisible: Boolean,
     targetAspectRatio: Float,
 ) {
@@ -827,6 +853,7 @@ private fun EmulationSurfaces(
     ScreensLayoutContainer(
         isVertical = screensLayout.isVertical(),
         gapPercent = screensGap,
+        yOffsetPercent = screensYOffsetPercent,
         targetAspectRatio = targetAspectRatio,
     ) {
         EmulationSurface(
@@ -858,6 +885,7 @@ private fun EmulationSurfaces(
 private fun ScreensLayoutContainer(
     isVertical: Boolean,
     gapPercent: Int,
+    yOffsetPercent: Int,
     targetAspectRatio: Float,
     content: @Composable () -> Unit,
 ) {
@@ -876,6 +904,10 @@ private fun ScreensLayoutContainer(
         } else {
             0
         }
+
+        // Vertical shift of the whole arrangement, as a percentage of the container height.
+        // Positive moves the screens down. Only used in portrait, where the screens are stacked.
+        val yOffset = (containerHeight * yOffsetPercent / 100f).roundToInt()
 
         // Each screen keeps its aspect ratio. In portrait (vertical) a full width screen may be
         // too tall, so its height is capped; in landscape (side by side) the width is capped.
@@ -898,8 +930,9 @@ private fun ScreensLayoutContainer(
 
         layout(containerWidth, containerHeight) {
             if (isVertical) {
-                // Stacked from the top so a lone screen is not floating in the middle.
-                var y = 0
+                // Stacked from the top (plus the user's offset) so a lone screen is not floating
+                // in the middle.
+                var y = yOffset
                 placeables.forEach { placeable ->
                     placeable.place(
                         IntOffset(
@@ -916,7 +949,7 @@ private fun ScreensLayoutContainer(
                     placeable.place(
                         IntOffset(
                             x = x,
-                            y = (containerHeight - placeable.height) / 2,
+                            y = (containerHeight - placeable.height) / 2 + yOffset,
                         )
                     )
                     x += placeable.width + gap

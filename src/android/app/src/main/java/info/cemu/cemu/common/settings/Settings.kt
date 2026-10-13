@@ -24,6 +24,10 @@ data class EmulationSettings(
     // Empty space between the TV and GamePad screens, as a percentage of the smaller screen
     // dimension so it looks the same in portrait and landscape.
     val screensGap: Int = DEFAULT_SCREENS_GAP,
+    // Vertical offset of the screens in portrait, as a percentage of the screen height. The
+    // portrait layout stacks the screens from the top, so this lets the user push them up or down
+    // to line them up with how the device is held. Positive moves the screens down.
+    val screensYOffsetPortrait: Int = 0,
     // Whether the emulated GamePad screen is shown. Portrait and landscape keep their own value
     // so a screen that is hidden in portrait (where it would not fit) can still be shown in
     // landscape.
@@ -36,6 +40,10 @@ data class EmulationSettings(
 const val DEFAULT_SCREENS_GAP: Int = 2
 const val MAX_SCREENS_GAP: Int = 20
 
+// Portrait screens vertical offset range, as a percentage of the screen height.
+const val MIN_SCREENS_Y_OFFSET: Int = -100
+const val MAX_SCREENS_Y_OFFSET: Int = 100
+
 // Per-game overrides for the display settings above. A null value means "use the global
 // default". All fields are optional so adding new ones never breaks stored settings.
 @Serializable
@@ -47,6 +55,8 @@ data class PerGameDisplaySettings(
     // Per-game override for the GamePad screen visibility, one value per orientation.
     val isPadVisiblePortrait: Boolean? = null,
     val isPadVisibleLandscape: Boolean? = null,
+    // Per-game override for the portrait screens vertical offset.
+    val screensYOffsetPortrait: Int? = null,
 )
 
 @Serializable

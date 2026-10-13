@@ -334,6 +334,10 @@ class EmulationViewModel(
         updatePerGameDisplaySettings { it.copy(screensGap = gap) }
     }
 
+    fun setScreensYOffsetPortrait(offset: Int) {
+        updatePerGameDisplaySettings { it.copy(screensYOffsetPortrait = offset) }
+    }
+
     private fun updatePerGameDisplaySettings(
         transform: (PerGameDisplaySettings) -> PerGameDisplaySettings,
     ) {
