@@ -280,8 +280,9 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             duration = 50L + (norm * 15f).roundToInt()
             amplitude = (strength * 0.33f).roundToInt().coerceAtLeast(1)
         } else {
-            // Single tap: short, full-strength impact.
-            duration = 45L + (norm * 40f).roundToInt()
+            // Single tap: short, full-strength impact. The duration is the part that makes a tap
+            // feel solid on devices that ignore the amplitude, so it is a bit longer than before.
+            duration = 60L + (norm * 50f).roundToInt()
             amplitude = strength
         }
 
