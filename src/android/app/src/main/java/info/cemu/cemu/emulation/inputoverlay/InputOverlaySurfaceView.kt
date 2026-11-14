@@ -78,6 +78,16 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     // Timestamp of the last haptic pulse, used to space out the pulses so a second finger does
     // not cancel a rumble that is already running.
     private var lastVibrateTime = 0L
+
+    // Taiko "big note": two fingers landing almost together on opposite sides of the same part of
+    // the drum (head with head, rim with rim) get a heavy thud with a fading aftershock instead of
+    // the normal short pulse. Ported from the Vita3K/Azahar tatacon haptics.
+    private var lastTaikoHitButton: OverlayTaiko? = null
+    private var lastTaikoHitTime = 0L
+    private var previousTaikoHitTime = 0L
+    private var lastTaikoPairWasBig = false
+    // Probed once, like Eden's lazy thudSupported.
+    private var thudPrimitiveSupported: Boolean? = null
 		
     init {
         visibility = GONE
@@ -248,7 +258,11 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         }
 
         if (state) {
-            triggerHapticFeedback()
+            if (button is OverlayTaiko) {
+                triggerTaikoHapticFeedback(button)
+            } else {
+                triggerHapticFeedback()
+            }
         }
 
         onOverlayButton(controllerIndex, nativeButtonId, state)
@@ -292,6 +306,108 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         }
 
         vibrator.vibrate(VibrationEffect.createOneShot(duration, amplitude.coerceIn(1, 255)))
+    }
+
+    private fun isTaikoHeadButton(button: OverlayTaiko) =
+        button == OverlayTaiko.DON_LEFT || button == OverlayTaiko.DON_RIGHT
+
+    private fun isTaikoLeftSideButton(button: OverlayTaiko) =
+        button == OverlayTaiko.DON_LEFT || button == OverlayTaiko.KA_LEFT
+
+    // Taiko hits keep their own timing so a two-finger big note can replace the first hit's pulse
+    // without disturbing the shared button/dpad/joystick debounce.
+    //
+    // The first hit always vibrates immediately, so single notes stay responsive. When a second
+    // finger lands on the opposite side of the same part (head with head, rim with rim) within
+    // TATACON_BIG_HIT_PAIR_WINDOW_MS, and the pair is isolated from previous hits, it gets a heavy
+    // thud (see vibrateTaikoBigHit) that replaces the first one. Both start at the configured
+    // amplitude, so the replacement is seamless.
+    private fun triggerTaikoHapticFeedback(button: OverlayTaiko) {
+        val now = SystemClock.uptimeMillis()
+        val previousButton = lastTaikoHitButton
+
+        val isBigPair = previousButton != null &&
+            now - lastTaikoHitTime in 0..TATACON_BIG_HIT_PAIR_WINDOW_MS &&
+            isTaikoHeadButton(previousButton) == isTaikoHeadButton(button) &&
+            isTaikoLeftSideButton(previousButton) != isTaikoLeftSideButton(button) &&
+            !lastTaikoPairWasBig &&
+            lastTaikoHitTime - previousTaikoHitTime >= TATACON_BIG_HIT_QUIET_BEFORE_MS
+
+        previousTaikoHitTime = lastTaikoHitTime
+        lastTaikoHitTime = now
+        lastTaikoHitButton = button
+        lastTaikoPairWasBig = isBigPair
+
+        if (!isVibrateOnTouchEnabled) {
+            return
+        }
+
+        val strength = vibrationAmplitude
+        if (strength <= 0) {
+            return
+        }
+
+        if (isBigPair) {
+            // Bypasses the debounce on purpose; replaces the first hit's pulse.
+            lastVibrateTime = now
+            vibrateTaikoBigHit(strength)
+            return
+        }
+
+        // Single hit: unchanged overlay haptics (crisp tap / soft rolling pulse).
+        triggerHapticFeedback()
+    }
+
+    // Vibrates the taiko "big note" thud, ported from Eden's HID rumble pipeline
+    // (ThudEffect + RumbleShaper). A big note arrives at full amplitude and the game keeps sending
+    // rumble for a few hundred milliseconds, which is rendered as one hard thud refreshed for as
+    // long as it lasts - the heavy attack, the audible motor "hum" and the fading aftershock:
+    //
+    // - PRIMITIVE_THUD composition primitives when the motor supports them: a chain of decaying
+    //   thuds with small gaps, mirroring the shaper's refreshes.
+    // - otherwise a waveform with the same envelope: full-strength attack, sustained mid section at
+    //   60%, fading tail at 30%.
+    private fun vibrateTaikoBigHit(strength: Int) {
+        val amplitude = strength.coerceIn(1, 255)
+        val scale = amplitude / 255f
+
+        val supportsThud = thudPrimitiveSupported ?: run {
+            val supported = vibrator.arePrimitivesSupported(
+                VibrationEffect.Composition.PRIMITIVE_THUD
+            )
+            (supported.firstOrNull() == true).also { thudPrimitiveSupported = it }
+        }
+
+        if (supportsThud) {
+            vibrator.vibrate(
+                VibrationEffect.startComposition()
+                    .addPrimitive(VibrationEffect.Composition.PRIMITIVE_THUD, scale)
+                    .addPrimitive(
+                        VibrationEffect.Composition.PRIMITIVE_THUD,
+                        scale * 0.6f,
+                        30
+                    )
+                    .addPrimitive(
+                        VibrationEffect.Composition.PRIMITIVE_THUD,
+                        scale * 0.3f,
+                        50
+                    )
+                    .compose()
+            )
+            return
+        }
+
+        // No thud primitive: the same envelope as a plain waveform.
+        val amplitudes = IntArray(TATACON_BIG_HIT_THUD_SCALES.size) { index ->
+            (amplitude * TATACON_BIG_HIT_THUD_SCALES[index]).roundToInt().coerceAtLeast(1)
+        }
+        vibrator.vibrate(
+            VibrationEffect.createWaveform(
+                TATACON_BIG_HIT_THUD_TIMINGS_MS,
+                amplitudes,
+                -1
+            )
+        )
     }
 
     private fun onOverlayAxis(axis: Int, value: Float) {
@@ -685,6 +801,15 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         // longer "rolling" pulse used for drum rolls / button mashing.
         private const val HAPTIC_DEBOUNCE_MS = 40L
         private const val HAPTIC_RAPID_WINDOW_MS = 180L
+
+        // Taiko big note (two fingers on opposite sides of the same part of the drum).
+        private const val TATACON_BIG_HIT_PAIR_WINDOW_MS = 40L
+        private const val TATACON_BIG_HIT_QUIET_BEFORE_MS = 110L
+        // The big-note pulse itself is Eden's heavy thud stretched over the whole note: full-strength
+        // attack, a sustained mid section, then a fade-out. A flat one-shot buzzes at one speed, and
+        // a single short thud ends before the motor is even heard.
+        private val TATACON_BIG_HIT_THUD_TIMINGS_MS = longArrayOf(35L, 150L, 75L)
+        private val TATACON_BIG_HIT_THUD_SCALES = floatArrayOf(1.0f, 0.6f, 0.3f)
     }
 }
 
