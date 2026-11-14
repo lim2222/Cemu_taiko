@@ -21,12 +21,9 @@
     "boost-program-options",
     "boost-nowide",
     "boost-algorithm",
-    "boost-functional",
     "boost-optional",
     "boost-signals2",
-    "boost-asio",
     "boost-ptr-container",
-    "boost-property-tree",
     "boost-static-string",
     {
       "name": "boost-iostreams",

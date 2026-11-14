@@ -2,6 +2,7 @@
 
 #include "input/api/InputAPI.h"
 #include "input/api/Controller.h"
+#include "input/motion/MotionHandler.h"
 #include "DeviceControllerProvider.h"
 
 class DeviceController : public Controller<DeviceControllerProvider>

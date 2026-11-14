@@ -202,7 +202,7 @@ if (UNIX AND NOT APPLE AND NOT ANDROID)
 
 	if(ENABLE_BLUEZ)
 		find_package(bluez REQUIRED)
-		set(SUPPORTS_WIIMOTE ON)
+		set(HAS_WIIMOTE ON)
 		add_compile_definitions(HAS_BLUEZ)
 	endif()
 
@@ -230,8 +230,12 @@ if (ENABLE_DISCORD_RPC)
 endif()
 
 if (ENABLE_HIDAPI)
-	set(SUPPORTS_WIIMOTE ON)
+	set(HAS_WIIMOTE ON)
 	add_compile_definitions(HAS_HIDAPI)
+endif ()
+
+if (HAS_WIIMOTE)
+	add_compile_definitions(HAS_WIIMOTE=1)
 endif ()
 
 if(UNIX AND NOT APPLE AND NOT ANDROID)

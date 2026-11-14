@@ -15,7 +15,6 @@ For general information about Cemu, see the [official website](https://cemu.info
  - [Compatibility List/Wiki](https://wiki.cemu.info/wiki/Main_Page)
  - [Official Subreddit](https://reddit.com/r/Cemu)
  - [Official Discord](https://discord.gg/5psYsup)
- - [Official Matrix Server](https://matrix.to/#/#cemu:cemu.info)
  - [Setup Guide](https://cemu.cfw.guide)
 
 #### Other relevant repositories:
