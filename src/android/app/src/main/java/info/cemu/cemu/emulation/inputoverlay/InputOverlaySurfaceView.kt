@@ -51,6 +51,11 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     private var inputMode = InputMode.DEFAULT
     private var pixelDensity = 1
     private var currentConfiguredInput: Input? = null
+    // Offset between the finger and the input center when the drag started, so the input does not
+    // jump to the finger position as soon as it is touched.
+    private var dragPointerId = MotionEvent.INVALID_POINTER_ID
+    private var dragOffsetX = 0f
+    private var dragOffsetY = 0f
     private var nativeControllerType = NativeInput.EmulatedControllerType.DISABLED
     // the controller type the inputs were last built for, used to rebuild them when it changes
     private var lastAppliedControllerType = Int.MIN_VALUE
@@ -568,12 +573,12 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             for ((_, input) in inputs) {
                 if (input.isInside(x, y)) {
                     currentConfiguredInput = input
-                    input.enableDrawingBoundingRect(
-                        resources.getColor(R.color.purple, context.theme)
-                    )
-                    val x = event.x.toInt()
-                    val y = event.y.toInt()
-                    input.moveInput(x, y, width, height)
+                    // Remember where the finger grabbed the input relative to its center so it can
+                    // be dragged without snapping to the finger position.
+                    val rect = input.getBoundingRectangle()
+                    dragPointerId = event.getPointerId(event.actionIndex)
+                    dragOffsetX = x - (rect.left + rect.right) / 2f
+                    dragOffsetY = y - (rect.top + rect.bottom) / 2f
                     return true
                 }
             }
@@ -583,16 +588,22 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             return false
         }
 
-        if (event.actionMasked == MotionEvent.ACTION_UP) {
-            configuredInput.disableDrawingBoundingRect()
+        if (event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL
+        ) {
             currentConfiguredInput = null
+            dragPointerId = MotionEvent.INVALID_POINTER_ID
             return true
         }
 
         if (event.actionMasked == MotionEvent.ACTION_MOVE) {
-            val x = event.x.toInt()
-            val y = event.y.toInt()
-            configuredInput.moveInput(x, y, width, height)
+            val pointerIndex = event.findPointerIndex(dragPointerId)
+            if (pointerIndex < 0) {
+                return true
+            }
+            val x = event.getX(pointerIndex) - dragOffsetX
+            val y = event.getY(pointerIndex) - dragOffsetY
+            configuredInput.moveInput(x.roundToInt(), y.roundToInt(), width, height)
             return true
         }
 
@@ -608,8 +619,6 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             for ((_, input) in inputs) {
                 if (input.isInside(x, y)) {
                     currentConfiguredInput = input
-                    val color = resources.getColor(R.color.red, context.theme)
-                    input.enableDrawingBoundingRect(color)
                     return true
                 }
             }
@@ -619,8 +628,9 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             return false
         }
 
-        if (event.actionMasked == MotionEvent.ACTION_UP) {
-            configuredInput.disableDrawingBoundingRect()
+        if (event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL
+        ) {
             currentConfiguredInput = null
             return true
         }

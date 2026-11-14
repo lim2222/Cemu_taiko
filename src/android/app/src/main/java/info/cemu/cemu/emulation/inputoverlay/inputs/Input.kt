@@ -4,7 +4,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
 import android.view.MotionEvent
-import androidx.annotation.ColorInt
 import info.cemu.cemu.common.settings.InputOverlayRect
 import info.cemu.cemu.emulation.inputoverlay.Colors
 import kotlin.math.max
@@ -13,8 +12,6 @@ import kotlin.math.min
 abstract class Input protected constructor(
     protected var rect: Rect,
 ) {
-    private var drawBoundingRectangle = false
-    private val boundingRectanglePaint = Paint()
     protected var activeFillColor = 0
     protected var activeStrokeColor = 0
     protected var inactiveFillColor = 0
@@ -73,10 +70,6 @@ abstract class Input protected constructor(
 
     protected abstract fun resetInput()
 
-    fun reset() {
-        drawBoundingRectangle = false
-    }
-
     protected abstract fun configure()
 
     protected fun configureColors(alpha: Int) {
@@ -89,19 +82,7 @@ abstract class Input protected constructor(
     protected abstract fun drawInput(canvas: Canvas)
 
     fun draw(canvas: Canvas) {
-        if (drawBoundingRectangle) {
-            canvas.drawRect(rect, boundingRectanglePaint)
-        }
         drawInput(canvas)
-    }
-
-    fun enableDrawingBoundingRect(@ColorInt color: Int) {
-        drawBoundingRectangle = true
-        boundingRectanglePaint.color = color
-    }
-
-    fun disableDrawingBoundingRect() {
-        drawBoundingRectangle = false
     }
 
     abstract fun isInside(x: Float, y: Float): Boolean
