@@ -10,6 +10,27 @@ abstract class Button(
     protected var state = false
     private var currentPointerId: Int = -1
 
+    val isPressed: Boolean
+        get() = state
+
+    // Used by InputOverlaySurfaceView for buttons that are driven by its slide handling instead of
+    // onTouch(): pressing a button the finger slid onto, and releasing the previous one.
+    fun press(pointerId: Int) {
+        if (state) {
+            return
+        }
+        currentPointerId = pointerId
+        updateState(true)
+    }
+
+    fun release() {
+        if (!state) {
+            return
+        }
+        currentPointerId = -1
+        updateState(false)
+    }
+
     override fun onTouch(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {

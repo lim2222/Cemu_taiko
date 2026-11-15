@@ -86,6 +86,16 @@ data class InputOverlayRect(
     val bottom: Int,
 )
 
+// What happens when a finger slides from one button to another without lifting:
+// HOLD keeps the button the finger landed on pressed for the whole gesture (e.g. holding B to
+// run) while buttons it slides onto are pressed only while the finger is over them; SWITCH
+// releases the previous button as well, so sliding back and forth triggers every button.
+@Serializable
+enum class InputOverlaySlideMode {
+    HOLD,
+    SWITCH,
+}
+
 @Serializable
 data class InputOverlaySettings(
     val isVibrateOnTouchEnabled: Boolean = false,
@@ -109,6 +119,9 @@ data class InputOverlaySettings(
     // opacity additionally by orientation through inputOverlayAlphaKey()).
     val inputOverlayAlphaByGame: Map<String, Int> = emptyMap(),
     val inputOverlayVibrateByGame: Map<String, Boolean> = emptyMap(),
+    val slideMode: InputOverlaySlideMode = InputOverlaySlideMode.HOLD,
+    // Like the vibrate preference this is a game preference, not a controller arrangement one.
+    val inputOverlaySlideModeByGame: Map<String, InputOverlaySlideMode> = emptyMap(),
 ) {
     fun resolvedForGame(
         gameKey: String?,
@@ -136,6 +149,7 @@ data class InputOverlaySettings(
                 ?: inputOverlayAlphaByGame[gameKey]
                 ?: alpha,
             isVibrateOnTouchEnabled = inputOverlayVibrateByGame[gameKey] ?: isVibrateOnTouchEnabled,
+            slideMode = inputOverlaySlideModeByGame[gameKey] ?: slideMode,
         )
     }
 }

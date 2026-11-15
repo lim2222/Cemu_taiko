@@ -19,6 +19,7 @@ import info.cemu.cemu.common.settings.AppSettingsStore
 import info.cemu.cemu.common.settings.EmulationSettings
 import info.cemu.cemu.common.settings.InputOverlayRect
 import info.cemu.cemu.common.settings.InputOverlaySettings
+import info.cemu.cemu.common.settings.InputOverlaySlideMode
 import info.cemu.cemu.common.settings.OverlayInputConfig
 import info.cemu.cemu.common.settings.PerGameDisplaySettings
 import info.cemu.cemu.common.settings.ScreenOrientationMode
@@ -237,6 +238,21 @@ class EmulationViewModel(
                     inputOverlaySettings = overlaySettings.copy(
                         inputOverlayVibrateByGame =
                             overlaySettings.inputOverlayVibrateByGame + (launchPath to enabled),
+                    )
+                )
+            }
+        }
+    }
+
+    fun setInputOverlaySlideMode(mode: InputOverlaySlideMode) {
+        viewModelScope.launch {
+            dataStore.updateData {
+                val overlaySettings = it.inputOverlaySettings
+
+                it.copy(
+                    inputOverlaySettings = overlaySettings.copy(
+                        inputOverlaySlideModeByGame =
+                            overlaySettings.inputOverlaySlideModeByGame + (launchPath to mode),
                     )
                 )
             }

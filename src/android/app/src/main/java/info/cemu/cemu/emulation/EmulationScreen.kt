@@ -67,6 +67,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import info.cemu.cemu.R
 import info.cemu.cemu.common.android.display.DisplayUtils
 import info.cemu.cemu.common.settings.HotkeyAction
+import info.cemu.cemu.common.settings.InputOverlaySlideMode
 import info.cemu.cemu.common.settings.MAX_SCREENS_GAP
 import info.cemu.cemu.common.settings.MAX_SCREENS_Y_OFFSET
 import info.cemu.cemu.common.settings.MIN_SCREENS_Y_OFFSET
@@ -329,6 +330,8 @@ fun EmulationScreen(
                         isVibrateOnTouchEnabled = inputOverlaySettings.isVibrateOnTouchEnabled,
                         overlayAlpha = inputOverlaySettings.alpha,
                         onVibrateChanged = { viewModel.setInputOverlayVibrateOnTouch(it) },
+                        slideMode = inputOverlaySettings.slideMode,
+                        onSlideModeChanged = { viewModel.setInputOverlaySlideMode(it) },
                         onAlphaChanged = { viewModel.setInputOverlayAlpha(it, isPortrait) },
                         onQuit = {
                             showQuitConfirmationDialog = true
@@ -569,6 +572,11 @@ private fun screensLayoutToString(layout: ScreensLayout): String = when (layout)
     ScreensLayout.SIDE_BY_SIDE -> tr("Side by side")
 }
 
+private fun slideModeToString(mode: InputOverlaySlideMode): String = when (mode) {
+    InputOverlaySlideMode.HOLD -> tr("Hold first button")
+    InputOverlaySlideMode.SWITCH -> tr("Switch button")
+}
+
 @Composable
 private fun EmulationSideMenuContent(
     sideMenuState: SideMenuState,
@@ -595,6 +603,8 @@ private fun EmulationSideMenuContent(
     isVibrateOnTouchEnabled: Boolean,
     overlayAlpha: Int,
     onVibrateChanged: (Boolean) -> Unit,
+    slideMode: InputOverlaySlideMode,
+    onSlideModeChanged: (InputOverlaySlideMode) -> Unit,
     onAlphaChanged: (Int) -> Unit,
     onQuit: () -> Unit,
 ) {
@@ -696,6 +706,15 @@ private fun EmulationSideMenuContent(
         label = tr("Vibrate on touch"),
         checked = isVibrateOnTouchEnabled,
         onCheckedChange = onVibrateChanged,
+        enabled = sideMenuState.isInputOverlayVisible,
+    )
+
+    SingleSelection(
+        label = tr("Button slide"),
+        choice = slideMode,
+        choices = InputOverlaySlideMode.entries,
+        choiceToString = { slideModeToString(it) },
+        onChoiceChanged = onSlideModeChanged,
         enabled = sideMenuState.isInputOverlayVisible,
     )
 

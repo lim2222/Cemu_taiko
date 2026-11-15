@@ -21,8 +21,10 @@ import info.cemu.cemu.R
 import info.cemu.cemu.common.android.context.getDeviceVibrator
 import info.cemu.cemu.common.settings.InputOverlayRect
 import info.cemu.cemu.common.settings.InputOverlaySettings
+import info.cemu.cemu.common.settings.InputOverlaySlideMode
 import info.cemu.cemu.common.settings.OverlayInputConfig
 import info.cemu.cemu.common.settings.getDefaultRectangle
+import info.cemu.cemu.emulation.inputoverlay.inputs.Button
 import info.cemu.cemu.emulation.inputoverlay.inputs.DPad
 import info.cemu.cemu.emulation.inputoverlay.inputs.Input
 import info.cemu.cemu.emulation.inputoverlay.inputs.Joystick
@@ -63,6 +65,17 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         { _, _, _, _, _ -> }
     private var overlyButtonToNativeButton: (OverlayInput) -> Int = { _ -> -1 }
     private var inputs: MutableList<Pair<OverlayInput, Input>> = mutableListOf()
+
+    // Buttons currently held down by each pointer, together with the buttons it has slid over.
+    // Sliding from one button to another without lifting is handled here because Button.onTouch
+    // only sees the button the finger landed on. The mode decides whether the buttons the finger
+    // passed stay pressed (HOLD) or are released (SWITCH).
+    private val buttonsByPointer = mutableMapOf<Int, MutableSet<Button>>()
+    // Pointers that started on a button and may therefore trigger further buttons while sliding.
+    private val slidingPointers = mutableSetOf<Int>()
+    // The button each sliding pointer landed on. In HOLD mode it stays pressed for the whole
+    // gesture, while buttons the finger slides onto are pressed/released as it enters/leaves them.
+    private val originButtons = mutableMapOf<Int, Button>()
     private val vibrator: Vibrator = context.getDeviceVibrator()
     private val inputsMinSize: Int
     private val isVisible: Boolean
@@ -71,6 +84,7 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     private var settings: InputOverlaySettings = InputOverlaySettings()
     private val controllerIndex get() = settings.controllerIndex
     private val currentAlpha get() = settings.alpha
+    private val slideMode get() = settings.slideMode
     private val isVibrateOnTouchEnabled: Boolean
         get() = settings.isVibrateOnTouchEnabled && vibrator.hasVibrator()
 	private val vibrationAmplitude: Int
@@ -118,6 +132,11 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             return
         }
 
+        // Hiding the overlay can swallow the finger-up event, so do not leave a button stuck down.
+        if (!isVisible) {
+            releaseAllButtons()
+        }
+
         visibility = if (isVisible) VISIBLE else GONE
 
         invalidate()
@@ -143,6 +162,8 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         this.inputMode = inputMode
 
         if (this.inputMode != InputMode.DEFAULT) {
+            // Editing the layout must not leave a gameplay button held down.
+            releaseAllButtons()
             return
         }
 
@@ -576,6 +597,10 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     }
 
     private fun setInputs() {
+        // The input objects are rebuilt below, so any button the old ones pressed has to be
+        // released first or it would stay held forever.
+        releaseAllButtons()
+
         if (isControllerDisabled(controllerIndex)) {
             inputs = mutableListOf()
             return
@@ -776,9 +801,18 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         when (inputMode) {
             InputMode.DEFAULT -> {
                 for ((_, input) in inputs) {
+                    // Buttons are driven by onDefaultTouch() so a finger can slide from one
+                    // button to another. DPad, joysticks and the taiko drum keep their own
+                    // multi-touch handling.
+                    if (input is Button) {
+                        continue
+                    }
                     if (input.onTouch(event)) {
                         touchEventProcessed = true
                     }
+                }
+                if (onDefaultTouch(event)) {
+                    touchEventProcessed = true
                 }
             }
 
@@ -788,6 +822,154 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
 
         if (touchEventProcessed) {
             invalidate()
+        }
+
+        return touchEventProcessed
+    }
+
+    private fun findButtonAt(x: Float, y: Float): Button? {
+        // Reversed so the button drawn on top wins when two buttons overlap.
+        for ((_, input) in inputs.asReversed()) {
+            if (input is Button && input.isInside(x, y)) {
+                return input
+            }
+        }
+        return null
+    }
+
+    private fun isButtonHeldByOtherPointer(button: Button, pointerId: Int): Boolean =
+        buttonsByPointer.any { (id, held) -> id != pointerId && button in held }
+
+    private fun pressButton(pointerId: Int, button: Button) {
+        val held = buttonsByPointer.getOrPut(pointerId) { mutableSetOf() }
+        if (!held.add(button)) {
+            return
+        }
+        // A button already held by another finger is shared instead of pressed twice.
+        if (!isButtonHeldByOtherPointer(button, pointerId)) {
+            button.press(pointerId)
+        }
+    }
+
+    private fun releaseButton(pointerId: Int, button: Button) {
+        val held = buttonsByPointer[pointerId] ?: return
+        if (!held.remove(button)) {
+            return
+        }
+        if (held.isEmpty()) {
+            buttonsByPointer.remove(pointerId)
+        }
+        if (!isButtonHeldByOtherPointer(button, pointerId)) {
+            button.release()
+        }
+    }
+
+    private fun releasePointer(pointerId: Int) {
+        slidingPointers.remove(pointerId)
+        originButtons.remove(pointerId)
+        val held = buttonsByPointer.remove(pointerId) ?: return
+        for (button in held) {
+            if (!isButtonHeldByOtherPointer(button, pointerId)) {
+                button.release()
+            }
+        }
+    }
+
+    private fun releaseAllButtons() {
+        slidingPointers.clear()
+        originButtons.clear()
+        val held = buttonsByPointer.values.flatten().toSet()
+        buttonsByPointer.clear()
+        for (button in held) {
+            button.release()
+        }
+    }
+
+    private fun buttonsAt(x: Float, y: Float): List<Button> =
+        inputs.mapNotNull { (_, input) ->
+            (input as? Button)?.takeIf { it.isInside(x, y) }
+        }
+
+    private fun onButtonSlide(pointerId: Int, x: Float, y: Float) {
+        if (pointerId !in slidingPointers) {
+            return
+        }
+
+        if (slideMode == InputOverlaySlideMode.HOLD) {
+            // HOLD: the button the finger landed on stays pressed until it lifts (e.g. holding B
+            // to run), while a button the finger slides onto is only pressed while the finger is
+            // over it. Sliding A→B triggers B, sliding back to A releases B, and sliding to B
+            // again triggers it again - all without lifting the finger.
+            val origin = originButtons[pointerId]
+            val hitButtons = buttonsAt(x, y)
+            val held = buttonsByPointer[pointerId]?.toList().orEmpty()
+            for (button in held) {
+                if (button !== origin && button !in hitButtons) {
+                    releaseButton(pointerId, button)
+                }
+            }
+            for (button in hitButtons) {
+                pressButton(pointerId, button)
+            }
+            return
+        }
+
+        // SWITCH: only the button under the finger is held. Sliding from A to B releases A and
+        // presses B, so sliding back and forth triggers A→B→A→B.
+        val target = findButtonAt(x, y)
+        val held = buttonsByPointer[pointerId]?.toList().orEmpty()
+        for (button in held) {
+            if (button !== target) {
+                releaseButton(pointerId, button)
+            }
+        }
+        if (target != null) {
+            pressButton(pointerId, target)
+        }
+    }
+
+    private fun onDefaultTouch(event: MotionEvent): Boolean {
+        var touchEventProcessed = false
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                val pointerIndex = event.actionIndex
+                val pointerId = event.getPointerId(pointerIndex)
+                val button = findButtonAt(event.getX(pointerIndex), event.getY(pointerIndex))
+                if (button != null) {
+                    // Only fingers that land on a button may trigger further buttons by sliding,
+                    // so a touch that starts on empty space keeps behaving like before.
+                    slidingPointers.add(pointerId)
+                    originButtons[pointerId] = button
+                    pressButton(pointerId, button)
+                    touchEventProcessed = true
+                }
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                for (pointerIndex in 0 until event.pointerCount) {
+                    val pointerId = event.getPointerId(pointerIndex)
+                    if (pointerId in slidingPointers) {
+                        onButtonSlide(pointerId, event.getX(pointerIndex), event.getY(pointerIndex))
+                        touchEventProcessed = true
+                    }
+                }
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
+                val pointerId = event.getPointerId(event.actionIndex)
+                if (pointerId in slidingPointers) {
+                    releasePointer(pointerId)
+                    touchEventProcessed = true
+                }
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                if (slidingPointers.isNotEmpty() || buttonsByPointer.isNotEmpty()) {
+                    releaseAllButtons()
+                    touchEventProcessed = true
+                }
+            }
         }
 
         return touchEventProcessed
