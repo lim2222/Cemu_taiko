@@ -334,6 +334,17 @@ class EmulationViewModel(
             EmulationSettings(),
         )
 
+    // True once the settings have really been read from disk. Before that, globalDisplaySettings
+    // still holds the defaults (landscape), which must not be applied to the window: doing so made
+    // every launch rotate to landscape first and only come back to portrait when the stored value
+    // arrived (or when the user rotated the device).
+    val isDisplaySettingsLoaded = dataStore.data.map { true }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            false,
+        )
+
     fun setScreenOrientation(mode: ScreenOrientationMode) {
         updatePerGameDisplaySettings { it.copy(screenOrientation = mode) }
     }

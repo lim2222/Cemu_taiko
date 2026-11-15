@@ -149,6 +149,7 @@ fun EmulationScreen(
     // fallback so a title can deviate from the global default.
     val perGameDisplaySettings by viewModel.perGameDisplaySettings.collectAsState()
     val globalDisplaySettings by viewModel.globalDisplaySettings.collectAsState()
+    val isDisplaySettingsLoaded by viewModel.isDisplaySettingsLoaded.collectAsState()
 
     val screenOrientationMode =
         perGameDisplaySettings?.screenOrientation ?: globalDisplaySettings.screenOrientation
@@ -183,7 +184,7 @@ fun EmulationScreen(
     // has actually reached the requested orientation. Once it started, the surfaces are kept
     // alive through later rotations (they are only resized) so those never recreate the
     // SurfaceView.
-    val isOrientationSettled = when (screenOrientationMode) {
+    val isOrientationSettled = isDisplaySettingsLoaded && when (screenOrientationMode) {
         ScreenOrientationMode.PORTRAIT -> isPortrait
         ScreenOrientationMode.LANDSCAPE -> !isPortrait
         ScreenOrientationMode.AUTO -> true
@@ -199,8 +200,14 @@ fun EmulationScreen(
     val targetAspectRatio = if (isPortrait) 4f / 3f else 16f / 9f
 
     val activity = LocalContext.current as? Activity
-    LaunchedEffect(activity, screenOrientationMode) {
-        activity?.requestedOrientation = screenOrientationMode.toRequestedOrientation()
+    LaunchedEffect(activity, screenOrientationMode, isDisplaySettingsLoaded) {
+        // Nothing is applied until the stored settings are known: the first composition still sees
+        // the default (landscape) and rotating the window there and back again on every launch is
+        // exactly what made the game start landscape. The activity itself already requests the
+        // stored orientation in onCreate, so only later changes need to be applied here.
+        if (isDisplaySettingsLoaded) {
+            activity?.requestedOrientation = screenOrientationMode.toRequestedOrientation()
+        }
     }
 
     // The surface is 4:3 in portrait and 16:9 in landscape. In landscape that already matches
