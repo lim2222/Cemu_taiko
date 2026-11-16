@@ -24,13 +24,14 @@ import info.cemu.cemu.common.settings.InputOverlaySettings
 import info.cemu.cemu.common.settings.InputOverlaySlideMode
 import info.cemu.cemu.common.settings.OverlayInputConfig
 import info.cemu.cemu.common.settings.getDefaultRectangle
+import info.cemu.cemu.emulation.EmulationSpeedState
 import info.cemu.cemu.emulation.inputoverlay.inputs.Button
 import info.cemu.cemu.emulation.inputoverlay.inputs.DPad
-import info.cemu.cemu.emulation.inputoverlay.inputs.FastForwardButton
 import info.cemu.cemu.emulation.inputoverlay.inputs.Input
 import info.cemu.cemu.emulation.inputoverlay.inputs.Joystick
 import info.cemu.cemu.emulation.inputoverlay.inputs.RectangleButton
 import info.cemu.cemu.emulation.inputoverlay.inputs.RoundButton
+import info.cemu.cemu.emulation.inputoverlay.inputs.SpeedToggleButton
 import info.cemu.cemu.emulation.inputoverlay.inputs.TaikoDrum
 import info.cemu.cemu.emulation.inputoverlay.inputs.innerdrawing.BlowButtonInnerDrawing
 import info.cemu.cemu.emulation.inputoverlay.inputs.innerdrawing.ButtonInnerDrawing
@@ -67,12 +68,18 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     private var overlyButtonToNativeButton: (OverlayInput) -> Int = { _ -> -1 }
     private var inputs: MutableList<Pair<OverlayInput, Input>> = mutableListOf()
 
-    // The fast forward toggle uses the two supplied images for the off/on state.
+    // The fast forward / slow motion toggles use the supplied images for the off/on state.
     private val fastForwardDisabledBitmap by lazy {
         BitmapFactory.decodeResource(resources, R.drawable.button_fast_forward_disabled)
     }
     private val fastForwardEnabledBitmap by lazy {
         BitmapFactory.decodeResource(resources, R.drawable.button_fast_forward_enabled)
+    }
+    private val slowMotionDisabledBitmap by lazy {
+        BitmapFactory.decodeResource(resources, R.drawable.button_slow_motion_disabled)
+    }
+    private val slowMotionEnabledBitmap by lazy {
+        BitmapFactory.decodeResource(resources, R.drawable.button_slow_motion_enabled)
     }
 
     // Buttons currently held down by each pointer, together with the buttons it has slid over.
@@ -579,14 +586,42 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         )
     }
 	
-	private fun MutableList<Pair<OverlayInput, Input>>.addFastForwardButton() {
+	private fun MutableList<Pair<OverlayInput, Input>>.addSpeedToggleButton(
+		input: OverlayInput,
+		disabledBitmap: Bitmap,
+		enabledBitmap: Bitmap,
+		isEnabled: () -> Boolean,
+		onToggle: () -> Unit,
+	) {
 		add(
-			OverlayFastForward to FastForwardButton(
+			input to SpeedToggleButton(
 				currentAlpha,
-				getBoundingRectangleForInput(OverlayFastForward),
-				fastForwardDisabledBitmap,
-				fastForwardEnabledBitmap,
+				getBoundingRectangleForInput(input),
+				disabledBitmap,
+				enabledBitmap,
+				isEnabled,
+				onToggle,
 			)
+		)
+	}
+
+	private fun MutableList<Pair<OverlayInput, Input>>.addFastForwardButton() {
+		addSpeedToggleButton(
+			OverlayFastForward,
+			fastForwardDisabledBitmap,
+			fastForwardEnabledBitmap,
+			EmulationSpeedState::isFastForwardEnabled,
+			EmulationSpeedState::toggleFastForward,
+		)
+	}
+
+	private fun MutableList<Pair<OverlayInput, Input>>.addSlowMotionButton() {
+		addSpeedToggleButton(
+			OverlaySlowMotion,
+			slowMotionDisabledBitmap,
+			slowMotionEnabledBitmap,
+			EmulationSpeedState::isSlowMotionEnabled,
+			EmulationSpeedState::toggleSlowMotion,
 		)
 	}
 
@@ -648,6 +683,7 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             // overlayInputsForControllerType() in OverlayInputs.kt.
             if (nativeControllerType == NativeInput.EmulatedControllerType.TAIKO) {
                 addFastForwardButton()
+                addSlowMotionButton()
                 addRoundButton(OverlayButton.MINUS, "-")
                 addRoundButton(OverlayButton.PLUS, "+")
                 addRoundButton(OverlayButton.ONE, "1")
@@ -655,6 +691,7 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
 
                 val excludeRects = listOf(
                     getBoundingRectangleForInput(OverlayFastForward),
+                    getBoundingRectangleForInput(OverlaySlowMotion),
                     getBoundingRectangleForInput(OverlayButton.MINUS),
                     getBoundingRectangleForInput(OverlayButton.PLUS),
                     getBoundingRectangleForInput(OverlayButton.ONE),
@@ -673,6 +710,7 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
                 )
             } else {
                 addFastForwardButton()
+                addSlowMotionButton()
                 addRoundButton(OverlayButton.MINUS, "-")
                 addRoundButton(OverlayButton.PLUS, "+")
                 addDpad()

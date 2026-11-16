@@ -151,11 +151,12 @@ fun EmulationScreen(
     val globalDisplaySettings by viewModel.globalDisplaySettings.collectAsState()
     val isDisplaySettingsLoaded by viewModel.isDisplaySettingsLoaded.collectAsState()
     val fastForwardSpeed by viewModel.fastForwardSpeed.collectAsState()
+    val slowMotionDivisor by viewModel.slowMotionDivisor.collectAsState()
 
-    // The emulated process is shared with the rest of the app, so fast forward must not stay
-    // enabled after the game is closed.
+    // The emulated process is shared with the rest of the app, so fast forward / slow motion must
+    // not stay enabled after the game is closed.
     DisposableEffect(Unit) {
-        onDispose { FastForwardState.setEnabled(false) }
+        onDispose { EmulationSpeedState.disableAll() }
     }
 
     val screenOrientationMode =
@@ -321,6 +322,8 @@ fun EmulationScreen(
                         },
                         fastForwardSpeed = fastForwardSpeed,
                         onFastForwardSpeedChanged = { viewModel.setFastForwardSpeed(it) },
+                        slowMotionDivisor = slowMotionDivisor,
+                        onSlowMotionDivisorChanged = { viewModel.setSlowMotionDivisor(it) },
                         updateState = {
                             viewModel.updateSideMenuState(it)
                             setMotionSensorEnabled(it.isMotionEnabled)
@@ -548,11 +551,14 @@ private fun overlayInputLabel(input: OverlayInputConfig, controllerType: Int): S
     OverlayInputConfig.TAIKO_KA_LEFT -> tr("Taiko drum")
     OverlayInputConfig.TAIKO_KA_RIGHT -> tr("Taiko drum")
     OverlayInputConfig.FAST_FORWARD -> tr("Fast forward")
+    OverlayInputConfig.SLOW_MOTION -> tr("Slow motion")
 }
 
-// Fast forward multipliers offered in the side menu. The on/off state is toggled by the
-// on-screen button; this only picks how much faster than normal time runs while it is on.
+// Fast forward multipliers and slow motion divisors offered in the side menu. The on/off states
+// are toggled by the on-screen buttons; these only pick how much faster or slower than normal time
+// runs while they are on.
 private val FastForwardSpeeds = listOf(2, 3, 4)
+private val SlowMotionDivisors = listOf(2, 3, 4)
 
 // Controller types that can be selected from the in-game side menu.
 private val SwitchableControllerTypes = listOf(
@@ -618,6 +624,8 @@ private fun EmulationSideMenuContent(
     onControllerTypeChanged: (Int) -> Unit,
     fastForwardSpeed: Int,
     onFastForwardSpeedChanged: (Int) -> Unit,
+    slowMotionDivisor: Int,
+    onSlowMotionDivisorChanged: (Int) -> Unit,
     updateState: (SideMenuState) -> Unit,
     onShowEmulatedUSBDevices: () -> Unit,
     onEditInputOverlay: () -> Unit,
@@ -720,6 +728,14 @@ private fun EmulationSideMenuContent(
         choices = FastForwardSpeeds,
         choiceToString = { "${it}x" },
         onChoiceChanged = onFastForwardSpeedChanged,
+    )
+
+    SingleSelection(
+        label = tr("Slow motion speed"),
+        choice = slowMotionDivisor,
+        choices = SlowMotionDivisors,
+        choiceToString = { "1/${it}x" },
+        onChoiceChanged = onSlowMotionDivisorChanged,
     )
 
     TextButtonItem(

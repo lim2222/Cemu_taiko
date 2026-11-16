@@ -1,5 +1,7 @@
 #include "CubebAPI.h"
 
+#include "Common/EmulationSpeed.h"
+
 #if BOOST_OS_WINDOWS
 #include <combaseapi.h>
 #include <mmreg.h>
@@ -119,13 +121,28 @@ bool CubebAPI::NeedAdditionalBlocks() const
 
 bool CubebAPI::FeedBlock(sint16* data)
 {
-	// fast forward: hand the device a shorter block so the queue drains faster than the guest
-	// produces, keeping audio in sync with the accelerated guest clock
+	// Fast forward / slow motion: hand the device a reshaped block so the queue drains at a
+	// different rate than the guest produces, keeping audio in sync with the scaled guest clock.
 	uint32 frames = m_samplesPerBlock;
-	const sint16* samples = ResampleForFastForward(data, frames);
+	const sint16* samples = ResampleForEmulationSpeed(data, frames);
 	const uint32 bytes = frames * (uint32)m_channels * (m_bitsPerSample / 8);
 
+	const int speedNum = EmulationSpeed::GetEffectiveNum();
+	const int speedDen = EmulationSpeed::GetEffectiveDen();
+
 	std::unique_lock lock(m_mutex);
+
+	// Leaving slow motion (going back to normal speed or to fast forward) leaves a backlog of
+	// expanded blocks that would play late. Fast forward blocks already drain faster than real
+	// time by themselves, and entering slow motion only leaves a normal-sized chunk queued.
+	if (m_prevSpeedDen > m_prevSpeedNum &&
+		(sint64)speedNum * m_prevSpeedDen > (sint64)m_prevSpeedNum * speedDen)
+	{
+		m_buffer.clear();
+	}
+	m_prevSpeedNum = speedNum;
+	m_prevSpeedDen = speedDen;
+
 	if (m_buffer.capacity() <= m_buffer.size() + bytes)
 	{
 		cemuLog_logDebug(LogType::Force, "dropped direct sound block since too many buffers are queued");

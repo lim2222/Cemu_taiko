@@ -17,6 +17,7 @@ import info.cemu.cemu.common.either.mapError
 import info.cemu.cemu.common.settings.AppSettings
 import info.cemu.cemu.common.settings.AppSettingsStore
 import info.cemu.cemu.common.settings.DEFAULT_FAST_FORWARD_SPEED
+import info.cemu.cemu.common.settings.DEFAULT_SLOW_MOTION_DIVISOR
 import info.cemu.cemu.common.settings.EmulationSettings
 import info.cemu.cemu.common.settings.InputOverlayRect
 import info.cemu.cemu.common.settings.InputOverlaySettings
@@ -123,8 +124,11 @@ class EmulationViewModel(
             val settings = dataStore.data.first()
             overlayControllerIndex = settings.inputOverlaySettings.controllerIndex
             _controllerType.value = NativeInput.getControllerType(overlayControllerIndex)
-            // A game always starts at normal speed; only the multiplier is remembered.
-            FastForwardState.reset(settings.emulationSettings.fastForwardSpeed)
+            // A game always starts at normal speed; only the multipliers are remembered.
+            EmulationSpeedState.reset(
+                settings.emulationSettings.fastForwardSpeed,
+                settings.emulationSettings.slowMotionDivisor,
+            )
             _sideMenuState.update {
                 it.copy(
                     isPadOnExternalDisplay = settings.emulationSettings.isPadOnExternalDisplay,
@@ -348,7 +352,8 @@ class EmulationViewModel(
             false,
         )
 
-    // Fast forward multiplier. The on/off state lives in FastForwardState and is not persisted.
+    // Fast forward multiplier and slow motion divisor. The on/off states live in
+    // EmulationSpeedState and are not persisted.
     val fastForwardSpeed = dataStore.data.map { it.emulationSettings.fastForwardSpeed }
         .stateIn(
             viewModelScope,
@@ -356,12 +361,30 @@ class EmulationViewModel(
             DEFAULT_FAST_FORWARD_SPEED,
         )
 
+    val slowMotionDivisor = dataStore.data.map { it.emulationSettings.slowMotionDivisor }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            DEFAULT_SLOW_MOTION_DIVISOR,
+        )
+
     fun setFastForwardSpeed(speed: Int) {
-        FastForwardState.setSpeed(speed)
+        EmulationSpeedState.setFastForwardSpeed(speed)
         viewModelScope.launch {
             dataStore.updateData {
                 it.copy(
                     emulationSettings = it.emulationSettings.copy(fastForwardSpeed = speed)
+                )
+            }
+        }
+    }
+
+    fun setSlowMotionDivisor(divisor: Int) {
+        EmulationSpeedState.setSlowMotionDivisor(divisor)
+        viewModelScope.launch {
+            dataStore.updateData {
+                it.copy(
+                    emulationSettings = it.emulationSettings.copy(slowMotionDivisor = divisor)
                 )
             }
         }

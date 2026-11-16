@@ -27,4 +27,5 @@ enum class OverlayInputConfig {
 	TAIKO_KA_LEFT,
 	TAIKO_KA_RIGHT,
 	FAST_FORWARD,
+	SLOW_MOTION,
 }

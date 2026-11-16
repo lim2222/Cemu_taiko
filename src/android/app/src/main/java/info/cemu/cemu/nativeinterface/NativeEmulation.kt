@@ -25,10 +25,16 @@ object NativeEmulation {
     @JvmStatic
     external fun setExternalScreenRotatedLeft(rotated: Boolean)
 
-    // Fast forward: toggling only changes the applied speed; the multiplier is kept separately so
-    // switching fast forward off and on again returns to the same speed.
+    // Fast forward / slow motion: toggling only changes the applied speed; the multipliers are
+    // kept separately so switching back on returns to the same speed. The two features are
+    // exclusive (fast forward wins natively if both are requested).
     @JvmStatic
-    external fun setFastForward(enabled: Boolean, speed: Int)
+    external fun setEmulationSpeed(
+        fastForwardEnabled: Boolean,
+        fastForwardSpeed: Int,
+        slowMotionEnabled: Boolean,
+        slowMotionDivisor: Int,
+    )
 
     @JvmStatic
     external fun initializeRenderer()

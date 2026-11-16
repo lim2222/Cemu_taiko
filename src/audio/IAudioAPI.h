@@ -81,16 +81,17 @@ protected:
 	WAVEFORMATEXTENSIBLE m_wfx{};
 #endif
 	
-	// Fast forward: compress a block of interleaved 16-bit samples so the same guest audio plays in
-	// less real time. The pitch rises (linear interpolation) instead of the audio being muted,
-	// which would leave nothing to listen to and would not keep the queue in sync.
+	// Fast forward / slow motion: rescale a block of interleaved 16-bit samples so the same guest
+	// audio plays in less (fast forward) or more (slow motion) real time. The pitch rises or drops
+	// (linear interpolation) instead of the audio being muted, which would leave nothing to listen
+	// to and would not keep the host queue in sync.
 	// framesInOut is the frame count of the block and is updated to the resampled frame count.
 	// Returns either the original pointer or an internal buffer valid until the next call.
-	const sint16* ResampleForFastForward(const sint16* data, uint32& framesInOut);
+	const sint16* ResampleForEmulationSpeed(const sint16* data, uint32& framesInOut);
 
 	uint32 m_samplerate, m_channels, m_samplesPerBlock, m_bitsPerSample;
 	uint32 m_bytesPerBlock;
-	std::vector<sint16> m_ffResampleBuffer;
+	std::vector<sint16> m_speedResampleBuffer;
 
 	sint32 m_volume = 0, m_inputVolume = 0;
 	bool m_playing = false;

@@ -4,17 +4,18 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
 import android.view.MotionEvent
-import info.cemu.cemu.emulation.FastForwardState
 
-// On-screen fast forward toggle. Unlike the controller buttons this is not an emulated input, so
-// it is a plain Input: a tap switches fast forward on or off immediately and the icon shows the
-// current state (the two drawables the user supplied). Being a plain Input also keeps it out of
-// the button slide handling, where a toggle would be triggered by accident.
-class FastForwardButton(
+// On-screen toggle that switches an emulation speed feature on or off. Unlike the controller
+// buttons this is not an emulated input, so it is a plain Input: a tap toggles the state
+// immediately and the icon shows it (the two supplied drawables). Being a plain Input also keeps
+// it out of the button slide handling, where a toggle would be triggered by accident.
+class SpeedToggleButton(
     private val alpha: Int,
     rect: Rect,
     private val disabledBitmap: Bitmap,
     private val enabledBitmap: Bitmap,
+    private val isEnabled: () -> Boolean,
+    private val onToggle: () -> Unit,
 ) : Input(rect) {
     init {
         configure()
@@ -29,7 +30,7 @@ class FastForwardButton(
 
     override fun drawInput(canvas: Canvas) {
         canvas.drawBitmap(
-            if (FastForwardState.isEnabled) enabledBitmap else disabledBitmap,
+            if (isEnabled()) enabledBitmap else disabledBitmap,
             null,
             rect,
             paint,
@@ -42,7 +43,7 @@ class FastForwardButton(
                 if (!isInside(event.x, event.y)) {
                     return false
                 }
-                FastForwardState.toggle()
+                onToggle()
                 return true
             }
 

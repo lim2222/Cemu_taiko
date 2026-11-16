@@ -34,7 +34,6 @@ public:
 	bool Play() override;
 	bool Stop() override;
 	void SetVolume(sint32 volume) override;
-
 	static std::vector<DeviceDescriptionPtr> GetDevices();
 
 	static bool InitializeStatic();
@@ -48,5 +47,9 @@ private:
 
 	mutable std::shared_mutex m_mutex;
 	std::vector<uint8> m_buffer;
+	// Last emulation time scale seen by FeedBlock. Slow motion hands the device expanded blocks,
+	// so when it ends the queued backlog would keep playing stale audio for up to a second.
+	int m_prevSpeedNum = 1;
+	int m_prevSpeedDen = 1;
 	static long data_cb(cubeb_stream* stream, void* user, const void* inputbuffer, void* outputbuffer, long nframes);
 };

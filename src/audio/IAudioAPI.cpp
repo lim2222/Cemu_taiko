@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "Common/FastForward.h"
+#include "Common/EmulationSpeed.h"
 
 #if BOOST_OS_WINDOWS
 #include "XAudio2API.h"
@@ -30,19 +30,21 @@ IAudioAPI::IAudioAPI(uint32 samplerate, uint32 channels, uint32 samples_per_bloc
 	InitWFX(m_samplerate, m_channels, m_bitsPerSample);
 }
 
-const sint16* IAudioAPI::ResampleForFastForward(const sint16* data, uint32& framesInOut)
+const sint16* IAudioAPI::ResampleForEmulationSpeed(const sint16* data, uint32& framesInOut)
 {
-	const uint32 speed = (uint32)FastForward::GetEffectiveSpeed();
-	if (speed <= 1 || framesInOut < 2 || m_channels == 0 || m_bitsPerSample != 16)
+	const uint32 speedNum = (uint32)EmulationSpeed::GetEffectiveNum();
+	const uint32 speedDen = (uint32)EmulationSpeed::GetEffectiveDen();
+	if (speedNum == speedDen || framesInOut < 2 || m_channels == 0 || m_bitsPerSample != 16)
 		return data;
 
 	const uint32 channels = (uint32)m_channels;
 	const uint32 inFrames = framesInOut;
-	const uint32 outFrames = inFrames / speed;
+	// Guest frames -> host frames: fast forward compresses, slow motion expands.
+	const uint32 outFrames = (uint32)((uint64)inFrames * speedDen / speedNum);
 	if (outFrames < 1)
 		return data;
 
-	m_ffResampleBuffer.resize((size_t)outFrames * channels);
+	m_speedResampleBuffer.resize((size_t)outFrames * channels);
 	const double step = (double)inFrames / (double)outFrames;
 	for (uint32 i = 0; i < outFrames; i++)
 	{
@@ -54,11 +56,11 @@ const sint16* IAudioAPI::ResampleForFastForward(const sint16* data, uint32& fram
 		{
 			const float a = data[(size_t)first * channels + c];
 			const float b = data[(size_t)second * channels + c];
-			m_ffResampleBuffer[(size_t)i * channels + c] = (sint16)(a + (b - a) * frac);
+			m_speedResampleBuffer[(size_t)i * channels + c] = (sint16)(a + (b - a) * frac);
 		}
 	}
 	framesInOut = outFrames;
-	return m_ffResampleBuffer.data();
+	return m_speedResampleBuffer.data();
 }
 
 void IAudioAPI::PrintLogging()

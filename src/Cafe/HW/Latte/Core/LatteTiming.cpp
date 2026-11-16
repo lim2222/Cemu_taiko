@@ -5,7 +5,7 @@
 #endif
 #include "util/highresolutiontimer/HighResolutionTimer.h"
 #include "config/CemuConfig.h"
-#include "Common/FastForward.h"
+#include "Common/EmulationSpeed.h"
 #include "Cafe/CafeSystem.h"
 
 sint32 s_customVsyncFrequency = -1;
@@ -33,12 +33,16 @@ HRTick LatteTime_CalculateTimeBetweenVSync()
 		tick /= 1002ull;
 		tick /= 60ull;
 	}
-	// Fast forward: emitting the emulated vsync events faster is what actually makes the game run
-	// ahead. The guest clock is scaled by the same factor (PPCTimer_getFromRDTSC), otherwise frame
-	// time and emulated time would drift apart.
-	const int speed = FastForward::GetEffectiveSpeed();
-	if (speed > 1)
-		tick /= (uint64)speed;
+	// Emulation speed: emitting the emulated vsync events at a different rate is what actually
+	// makes the game run ahead or behind. The guest clock is scaled by the same fraction
+	// (PPCTimer_getFromRDTSC), otherwise frame time and emulated time would drift apart.
+	const int speedNum = EmulationSpeed::GetEffectiveNum();
+	const int speedDen = EmulationSpeed::GetEffectiveDen();
+	if (speedNum != speedDen)
+	{
+		tick *= (uint64)speedDen;
+		tick /= (uint64)speedNum;
+	}
 	return tick;
 }
 
@@ -46,7 +50,7 @@ HRTick LatteTime_CalculateTimeBetweenVSync()
 // presenting anything?" signal for fast forward
 void LatteTiming_NotifyFlipRequested()
 {
-	FastForward::NotifyFlipRequested(HighResolutionTimer::now().getTick());
+	EmulationSpeed::NotifyFlipRequested(HighResolutionTimer::now().getTick());
 }
 
 void LatteTiming_setCustomVsyncFrequency(sint32 frequency)
@@ -87,8 +91,8 @@ bool LatteTiming_IsUsingHostDrivenVSync()
 
 void LatteTiming_Init()
 {
-	FastForward::ResetFlipTimestamp();
-	FastForward::UpdateEffectiveSpeed(true); // no frame has been presented yet
+	EmulationSpeed::Reset();
+	EmulationSpeed::UpdateEffective(true); // no frame has been presented yet
 	LatteGPUState.timer_frequency = HighResolutionTimer::getFrequency();
 	LatteGPUState.timer_bootUp = HighResolutionTimer::now().getTick();
 	LatteGPUState.timer_nextVSync = LatteGPUState.timer_bootUp + LatteTime_CalculateTimeBetweenVSync();
@@ -176,9 +180,10 @@ void LatteTiming_HandleTimedVsync()
 {
 	// simulate VSync
 	uint64 currentTimer = HighResolutionTimer::now().getTick();
-	// suspend fast forward while the game is not presenting frames (loading, blocking on I/O)
+	// suspend fast forward while the game is not presenting frames (loading, blocking on I/O).
+	// Slow motion is never suspended.
 	static const HRTick s_ffStallTicks = HighResolutionTimer::microsecondsToTicks(FF_STALL_TICKS_MS * 1000);
-	FastForward::UpdateEffectiveSpeed(FastForward::IsStalled(currentTimer, s_ffStallTicks));
+	EmulationSpeed::UpdateEffective(EmulationSpeed::IsStalled(currentTimer, s_ffStallTicks));
 	if( currentTimer >= LatteGPUState.timer_nextVSync )
 	{
 		if(!LatteTiming_IsUsingHostDrivenVSync())

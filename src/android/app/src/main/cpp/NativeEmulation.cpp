@@ -8,7 +8,7 @@
 #include "Cafe/OS/libs/snd_core/ax.h"
 #include "Cafe/TitleList/TitleId.h"
 #include "Cafe/TitleList/TitleList.h"
-#include "Common/FastForward.h"
+#include "Common/EmulationSpeed.h"
 #include "Cemu/ncrypto/ncrypto.h"
 #include "config/ActiveSettings.h"
 #include "input/InputManager.h"
@@ -241,9 +241,9 @@ Java_info_cemu_cemu_nativeinterface_NativeEmulation_setExternalScreenRotatedLeft
 }
 
 extern "C" [[maybe_unused]] JNIEXPORT void JNICALL
-Java_info_cemu_cemu_nativeinterface_NativeEmulation_setFastForward([[maybe_unused]] JNIEnv* env, [[maybe_unused]] jclass clazz, jboolean enabled, jint speed)
+Java_info_cemu_cemu_nativeinterface_NativeEmulation_setEmulationSpeed([[maybe_unused]] JNIEnv* env, [[maybe_unused]] jclass clazz, jboolean fastForwardEnabled, jint fastForwardSpeed, jboolean slowMotionEnabled, jint slowMotionDivisor)
 {
-	FastForward::SetState(enabled, speed);
+	EmulationSpeed::SetState(fastForwardEnabled, fastForwardSpeed, slowMotionEnabled, slowMotionDivisor);
 }
 
 extern "C" [[maybe_unused]] JNIEXPORT void JNICALL

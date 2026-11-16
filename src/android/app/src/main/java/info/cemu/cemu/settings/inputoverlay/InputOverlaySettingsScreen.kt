@@ -104,5 +104,7 @@ fun InputOverlaySettingsScreen(
         VisibleInputToggle(tr("D-pad"), OverlayInputConfig.DPAD)
 
         VisibleInputToggle(tr("Fast forward"), OverlayInputConfig.FAST_FORWARD)
+
+        VisibleInputToggle(tr("Slow motion"), OverlayInputConfig.SLOW_MOTION)
     }
 }

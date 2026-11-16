@@ -3,7 +3,7 @@
 #include "util/helpers/fspinlock.h"
 #include "util/highresolutiontimer/HighResolutionTimer.h"
 #include "Common/cpu_features.h"
-#include "Common/FastForward.h"
+#include "Common/EmulationSpeed.h"
 
 #if defined(ARCH_X86_64)
 #include <immintrin.h>
@@ -161,11 +161,15 @@ uint64 PPCTimer_getFromRDTSC()
 	uint8 timerShiftFactor = ActiveSettings::GetTimerShiftFactor();
 	elapsedTick >>= timerShiftFactor;
 
-	// fast forward: the guest clock has to run as much faster than real time as the vsync pacing
-	// does, otherwise frame time and emulated time drift apart
-	const int ffSpeed = FastForward::GetEffectiveSpeed();
-	if (ffSpeed > 1)
-		elapsedTick *= (uint64)ffSpeed;
+	// emulation speed (fast forward / slow motion): the guest clock has to run at the same rate
+	// as the vsync pacing, otherwise frame time and emulated time drift apart
+	const int speedNum = EmulationSpeed::GetEffectiveNum();
+	const int speedDen = EmulationSpeed::GetEffectiveDen();
+	if (speedNum != speedDen)
+	{
+		elapsedTick *= (uint64)speedNum;
+		elapsedTick /= (uint64)speedDen;
+	}
 
 	_tickSummary += elapsedTick;
 
