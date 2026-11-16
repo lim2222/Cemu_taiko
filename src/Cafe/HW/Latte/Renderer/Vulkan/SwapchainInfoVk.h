@@ -55,6 +55,14 @@ struct SwapchainInfoVk
 		return m_actualExtent;
 	}
 
+#if BOOST_PLAT_ANDROID
+	// the ANativeWindow the current VkSurfaceKHR was created from
+	ANativeWindow* getCurrentWindow() const
+	{
+		return m_currentWindow;
+	}
+#endif
+
 	SwapchainInfoVk(bool mainWindow, Vector2i size);
 	SwapchainInfoVk(const SwapchainInfoVk&) = delete;
 	SwapchainInfoVk(SwapchainInfoVk&&) noexcept = default;

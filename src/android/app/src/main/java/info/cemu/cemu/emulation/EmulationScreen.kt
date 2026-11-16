@@ -385,6 +385,9 @@ fun EmulationScreen(
             onEditFinished = {
                 viewModel.saveInputOverlayRectangles(inputOverlayControllerType, isPortrait, it)
             },
+            onMenuRequested = {
+                scope.launch { toggleMenu() }
+            },
         )
 
         if (inputOverlayInputMode != DEFAULT) {
@@ -552,6 +555,8 @@ private fun overlayInputLabel(input: OverlayInputConfig, controllerType: Int): S
     OverlayInputConfig.TAIKO_KA_RIGHT -> tr("Taiko drum")
     OverlayInputConfig.FAST_FORWARD -> tr("Fast forward")
     OverlayInputConfig.SLOW_MOTION -> tr("Slow motion")
+    OverlayInputConfig.PAUSE -> tr("Pause")
+    OverlayInputConfig.MENU -> tr("Menu")
 }
 
 // Fast forward multipliers and slow motion divisors offered in the side menu. The on/off states

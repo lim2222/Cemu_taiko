@@ -220,9 +220,9 @@ fun defaultOverlayConfigFor(input: OverlayInputConfig): InputOverlayConfig {
             size = 200
         )
 
-        // Fast forward and slow motion live in the top-left corner for every controller type so
-        // they do not overlap the drum or the joysticks. They can be moved, resized or hidden
-        // like any input.
+        // Fast forward, slow motion, pause and the menu live in the top-left corner for every
+        // controller type so they do not overlap the drum or the joysticks. They can be moved,
+        // resized or hidden like any input.
         OverlayInputConfig.FAST_FORWARD -> InputOverlayConfig(
             paddingHorizontal = 8,
             paddingVertical = 8,
@@ -231,6 +231,18 @@ fun defaultOverlayConfigFor(input: OverlayInputConfig): InputOverlayConfig {
 
         OverlayInputConfig.SLOW_MOTION -> InputOverlayConfig(
             paddingHorizontal = 56,
+            paddingVertical = 8,
+            size = 40
+        )
+
+        OverlayInputConfig.PAUSE -> InputOverlayConfig(
+            paddingHorizontal = 104,
+            paddingVertical = 8,
+            size = 40
+        )
+
+        OverlayInputConfig.MENU -> InputOverlayConfig(
+            paddingHorizontal = 152,
             paddingVertical = 8,
             size = 40
         )

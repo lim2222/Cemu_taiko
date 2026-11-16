@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import android.view.SurfaceView
 import android.view.View
 import android.view.View.OnTouchListener
+import android.widget.Toast
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -24,7 +25,9 @@ import info.cemu.cemu.common.settings.InputOverlaySettings
 import info.cemu.cemu.common.settings.InputOverlaySlideMode
 import info.cemu.cemu.common.settings.OverlayInputConfig
 import info.cemu.cemu.common.settings.getDefaultRectangle
+import info.cemu.cemu.emulation.EmulationPauseState
 import info.cemu.cemu.emulation.EmulationSpeedState
+import info.cemu.cemu.emulation.inputoverlay.inputs.ActionButton
 import info.cemu.cemu.emulation.inputoverlay.inputs.Button
 import info.cemu.cemu.emulation.inputoverlay.inputs.DPad
 import info.cemu.cemu.emulation.inputoverlay.inputs.Input
@@ -51,6 +54,10 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
 
     var onEditFinishedListener: ((Map<OverlayInputConfig, InputOverlayRect>) -> Unit)? =
         null
+
+    // Called when the on-screen menu button is tapped. The side menu lives in Compose, so the
+    // screen wires this to its drawer.
+    var onMenuRequested: () -> Unit = {}
 
     private var inputMode = InputMode.DEFAULT
     private var pixelDensity = 1
@@ -80,6 +87,13 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     }
     private val slowMotionEnabledBitmap by lazy {
         BitmapFactory.decodeResource(resources, R.drawable.button_slow_motion_enabled)
+    }
+    // Pause and menu use the supplied single-state images.
+    private val pauseBitmap by lazy {
+        BitmapFactory.decodeResource(resources, R.drawable.button_pause)
+    }
+    private val menuBitmap by lazy {
+        BitmapFactory.decodeResource(resources, R.drawable.button_menu)
     }
 
     // Buttons currently held down by each pointer, together with the buttons it has slid over.
@@ -625,6 +639,36 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
 		)
 	}
 
+	private fun MutableList<Pair<OverlayInput, Input>>.addActionButton(
+		input: OverlayInput,
+		bitmap: Bitmap,
+		onTap: () -> Unit,
+	) {
+		add(
+			input to ActionButton(
+				currentAlpha,
+				getBoundingRectangleForInput(input),
+				bitmap,
+				onTap,
+			)
+		)
+	}
+
+	private fun MutableList<Pair<OverlayInput, Input>>.addPauseButton() {
+		addActionButton(OverlayPause, pauseBitmap) {
+			val isPaused = EmulationPauseState.toggle()
+			Toast.makeText(
+				context,
+				if (isPaused) "emulation pause" else "emulation unpause",
+				Toast.LENGTH_SHORT,
+			).show()
+		}
+	}
+
+	private fun MutableList<Pair<OverlayInput, Input>>.addMenuButton() {
+		addActionButton(OverlayMenu, menuBitmap) { onMenuRequested() }
+	}
+
 	private fun MutableList<Pair<OverlayInput, Input>>.addTaikoDrum() {
 		val drumBitmap = BitmapFactory.decodeResource(resources, R.drawable.tatacon)
 		add(
@@ -684,6 +728,8 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             if (nativeControllerType == NativeInput.EmulatedControllerType.TAIKO) {
                 addFastForwardButton()
                 addSlowMotionButton()
+                addPauseButton()
+                addMenuButton()
                 addRoundButton(OverlayButton.MINUS, "-")
                 addRoundButton(OverlayButton.PLUS, "+")
                 addRoundButton(OverlayButton.ONE, "1")
@@ -692,6 +738,8 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
                 val excludeRects = listOf(
                     getBoundingRectangleForInput(OverlayFastForward),
                     getBoundingRectangleForInput(OverlaySlowMotion),
+                    getBoundingRectangleForInput(OverlayPause),
+                    getBoundingRectangleForInput(OverlayMenu),
                     getBoundingRectangleForInput(OverlayButton.MINUS),
                     getBoundingRectangleForInput(OverlayButton.PLUS),
                     getBoundingRectangleForInput(OverlayButton.ONE),
@@ -711,6 +759,8 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             } else {
                 addFastForwardButton()
                 addSlowMotionButton()
+                addPauseButton()
+                addMenuButton()
                 addRoundButton(OverlayButton.MINUS, "-")
                 addRoundButton(OverlayButton.PLUS, "+")
                 addDpad()
@@ -1063,6 +1113,7 @@ fun InputOverlaySurface(
     controllerType: Int,
     inputMode: InputOverlaySurfaceView.InputMode,
     onEditFinished: (Map<OverlayInputConfig, InputOverlayRect>) -> Unit,
+    onMenuRequested: () -> Unit,
 ) {
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -1072,6 +1123,7 @@ fun InputOverlaySurface(
                 setInputMode(inputMode)
                 applySettings(inputOverlaySettings, controllerType)
                 onEditFinishedListener = onEditFinished
+                this.onMenuRequested = onMenuRequested
             }
         },
         update = { view ->
@@ -1079,6 +1131,7 @@ fun InputOverlaySurface(
             view.setInputMode(inputMode)
             view.applySettings(inputOverlaySettings, controllerType)
             view.onEditFinishedListener = onEditFinished
+            view.onMenuRequested = onMenuRequested
         }
     )
 }

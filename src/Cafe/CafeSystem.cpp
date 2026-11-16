@@ -977,6 +977,11 @@ namespace CafeSystem
 		coreinit::ResumeActiveThreads();
 	}
 
+	bool IsTitlePaused()
+	{
+		return sTitlePaused;
+	}
+
 	TitleId GetForegroundTitleId()
 	{
 		cemu_assert_debug(sForegroundTitleId != 0);

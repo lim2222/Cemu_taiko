@@ -106,5 +106,9 @@ fun InputOverlaySettingsScreen(
         VisibleInputToggle(tr("Fast forward"), OverlayInputConfig.FAST_FORWARD)
 
         VisibleInputToggle(tr("Slow motion"), OverlayInputConfig.SLOW_MOTION)
+
+        VisibleInputToggle(tr("Pause"), OverlayInputConfig.PAUSE)
+
+        VisibleInputToggle(tr("Menu"), OverlayInputConfig.MENU)
     }
 }

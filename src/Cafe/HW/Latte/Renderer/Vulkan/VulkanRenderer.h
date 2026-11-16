@@ -209,6 +209,12 @@ public:
 	void StopUsingPadAndWait();
 	bool IsPadWindowActive() override;
 
+#if BOOST_PLAT_ANDROID
+	// called from the UI thread when a new ANativeWindow was installed for the main canvas.
+	// The swapchain is recreated against the new surface on the render thread.
+	void NotifyMainSurfaceChanged();
+#endif
+
 	void HandleScreenshotRequest(LatteTextureView* texView, bool padView) override;
 
 	void QueryMemoryInfo();
@@ -439,6 +445,10 @@ private:
 
 	std::unique_ptr<SwapchainInfoVk> m_mainSwapchainInfo{}, m_padSwapchainInfo{};
 	std::atomic_flag m_destroyPadSwapchainNextAcquire{};
+#if BOOST_PLAT_ANDROID
+	std::atomic_bool m_mainSurfaceChanged{}; // a new main ANativeWindow is waiting to be picked up
+	std::atomic<ANativeWindow*> m_pendingMainWindow{};
+#endif
 	bool IsSwapchainInfoValid(bool mainWindow) const;
 
 	VkRenderPass m_imguiRenderPass = VK_NULL_HANDLE;

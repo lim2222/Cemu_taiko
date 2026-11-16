@@ -305,6 +305,11 @@ Java_info_cemu_cemu_nativeinterface_NativeEmulation_setSurface(JNIEnv* env, [[ma
 		ANativeWindow_acquire(newSurface);
 		windowHandleInfo.surface = newSurface;
 		windowHandleInfo.surface.notify_all();
+
+		// the main swapchain keeps its VkSurfaceKHR until the render thread recreates it.
+		// Without this it would keep presenting to the destroyed surface after a rotation
+		if (isMainCanvas && g_renderer && g_renderer->GetType() == RendererAPI::Vulkan)
+			static_cast<VulkanRenderer*>(g_renderer.get())->NotifyMainSurfaceChanged();
 	});
 }
 

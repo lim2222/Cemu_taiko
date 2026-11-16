@@ -45,10 +45,13 @@ enum class OverlayTaiko : OverlayInput {
 	KA_RIGHT,
 }
 
-// On-screen fast forward / slow motion toggles. They are not emulated controller inputs: they
-// switch the emulation speed, so they are available for every controller type.
+// On-screen fast forward / slow motion toggles, pause and the menu. They are not emulated
+// controller inputs: they switch the emulation speed, pause the game or open the side menu, so
+// they are available for every controller type.
 object OverlayFastForward : OverlayInput
 object OverlaySlowMotion : OverlayInput
+object OverlayPause : OverlayInput
+object OverlayMenu : OverlayInput
 
 fun OverlayInput.toConfig(): OverlayInputConfig = when (this) {
     is OverlayButton -> when (this) {
@@ -88,6 +91,8 @@ fun OverlayInput.toConfig(): OverlayInputConfig = when (this) {
 
 	OverlayFastForward -> OverlayInputConfig.FAST_FORWARD
 	OverlaySlowMotion -> OverlayInputConfig.SLOW_MOTION
+	OverlayPause -> OverlayInputConfig.PAUSE
+	OverlayMenu -> OverlayInputConfig.MENU
 }
 
 // The overlay inputs that actually get drawn for a given emulated controller type.
@@ -96,6 +101,8 @@ fun overlayInputsForControllerType(controllerType: Int): List<OverlayInput> = wh
     NativeInput.EmulatedControllerType.TAIKO -> listOf(
         OverlayFastForward,
         OverlaySlowMotion,
+        OverlayPause,
+        OverlayMenu,
         OverlayButton.MINUS,
         OverlayButton.PLUS,
         OverlayButton.ONE,
@@ -106,6 +113,8 @@ fun overlayInputsForControllerType(controllerType: Int): List<OverlayInput> = wh
     NativeInput.EmulatedControllerType.WIIMOTE -> listOf(
         OverlayFastForward,
         OverlaySlowMotion,
+        OverlayPause,
+        OverlayMenu,
         OverlayButton.MINUS,
         OverlayButton.PLUS,
         OverlayDpad.DPAD_UP,
@@ -122,6 +131,8 @@ fun overlayInputsForControllerType(controllerType: Int): List<OverlayInput> = wh
     NativeInput.EmulatedControllerType.CLASSIC -> listOf(
         OverlayFastForward,
         OverlaySlowMotion,
+        OverlayPause,
+        OverlayMenu,
         OverlayButton.MINUS,
         OverlayButton.PLUS,
         OverlayDpad.DPAD_UP,
@@ -143,6 +154,8 @@ fun overlayInputsForControllerType(controllerType: Int): List<OverlayInput> = wh
         val buttons = mutableListOf<OverlayInput>(
             OverlayFastForward,
             OverlaySlowMotion,
+            OverlayPause,
+            OverlayMenu,
             OverlayButton.MINUS,
             OverlayButton.PLUS,
             OverlayDpad.DPAD_UP,

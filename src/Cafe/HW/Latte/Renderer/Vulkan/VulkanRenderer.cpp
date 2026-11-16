@@ -1019,6 +1019,10 @@ void VulkanRenderer::InitializeSurface(const Vector2i& size, bool mainWindow)
 		m_padSwapchainInfo = std::make_unique<SwapchainInfoVk>(mainWindow, size);
 		// todo: figure out a way to exclusively create swapchain on main LatteThread
 		m_padSwapchainInfo->Create();
+		// the old pad swapchain is gone with the surface. Drop a destroy request that is still
+		// pending because StopUsingPadAndWait() could not wait for it while the title was paused
+		m_destroyPadSwapchainNextAcquire.clear();
+		m_destroyPadSwapchainNextAcquire.notify_all();
 	}
 }
 
@@ -1035,8 +1039,24 @@ SwapchainInfoVk& VulkanRenderer::GetChainInfo(bool mainWindow) const
 void VulkanRenderer::StopUsingPadAndWait()
 {
 	m_destroyPadSwapchainNextAcquire.test_and_set();
+	if (CafeSystem::IsTitlePaused())
+	{
+		// The render thread is suspended while the title is paused, so it would never reach
+		// AcquireNextSwapchainImage to release this wait. Leave the request pending instead,
+		// the render thread drops the stale pad swapchain when the emulation resumes.
+		return;
+	}
 	m_destroyPadSwapchainNextAcquire.wait(true);
 }
+
+#if BOOST_PLAT_ANDROID
+void VulkanRenderer::NotifyMainSurfaceChanged()
+{
+	auto window = static_cast<ANativeWindow*>(WindowSystem::GetWindowInfo().canvas_main.surface.load());
+	m_pendingMainWindow = window;
+	m_mainSurfaceChanged = true;
+}
+#endif
 
 bool VulkanRenderer::IsPadWindowActive()
 {
@@ -3170,6 +3190,14 @@ bool VulkanRenderer::UpdateSwapchainProperties(bool mainWindow)
 		stateChanged = true;
 
 #if BOOST_PLAT_ANDROID
+	if (mainWindow && m_mainSurfaceChanged.exchange(false))
+	{
+		// the main canvas got a new ANativeWindow. Only recreate if the swapchain still uses
+		// the old one, otherwise RecreateSurface() would wait for a change that never comes
+		auto window = m_pendingMainWindow.load();
+		if (window != nullptr && window != chainInfo.getCurrentWindow())
+			chainInfo.surfaceWasLost = true;
+	}
 	if (chainInfo.surfaceWasLost)
 		stateChanged = true;
 #endif

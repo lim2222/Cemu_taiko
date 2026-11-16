@@ -129,6 +129,7 @@ class EmulationViewModel(
                 settings.emulationSettings.fastForwardSpeed,
                 settings.emulationSettings.slowMotionDivisor,
             )
+            EmulationPauseState.reset()
             _sideMenuState.update {
                 it.copy(
                     isPadOnExternalDisplay = settings.emulationSettings.isPadOnExternalDisplay,
@@ -463,7 +464,7 @@ class EmulationViewModel(
                 val mainSurfaceWasDestroyed = destroyedSurfaces.get(isMain = true)
 
                 if (mainSurfaceWasDestroyed && isMainCanvas) {
-                    NativeEmulation.resumeTitle()
+                    EmulationPauseState.resumeAfterSurfaceRecreated()
                 }
 
                 setSurfaces.set(isMainCanvas, true)
