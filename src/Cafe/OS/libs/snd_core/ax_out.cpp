@@ -3,6 +3,7 @@
 #include "audio/IAudioAPI.h"
 #include "config/CemuConfig.h"
 #include "Common/CafeStaticVar.h"
+#include "Common/FastForward.h"
 
 namespace snd_core
 {
@@ -478,10 +479,15 @@ namespace snd_core
 	// called periodically to check for AX updates
 	void AXOut_update()
 	{
-		constexpr static auto kTimeout = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds(((IAudioAPI::kBlockCount * 3) / 4) * (AX_FRAMES_PER_GROUP * 3)));
-		constexpr static auto kWaitDuration = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds(3));
-		constexpr static auto kWaitDurationFast = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds(2900));
-		constexpr static auto kWaitDurationMinimum = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds(1700));
+		// Fast forward: the guest sound thread is paced by the host audio queue, so the wait times
+		// have to shrink by the same factor that the blocks were compressed with in
+		// IAudioAPI::ResampleForFastForward.
+		const int ffSpeed = FastForward::GetEffectiveSpeed();
+		const auto ffDiv = (std::chrono::nanoseconds::rep)(ffSpeed > 1 ? ffSpeed : 1);
+		const auto kTimeout = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds(((IAudioAPI::kBlockCount * 3) / 4) * (AX_FRAMES_PER_GROUP * 3))) / ffDiv;
+		const auto kWaitDuration = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::milliseconds(3)) / ffDiv;
+		const auto kWaitDurationFast = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds(2900)) / ffDiv;
+		const auto kWaitDurationMinimum = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::microseconds(1700)) / ffDiv;
 
 		// if we haven't buffered any blocks, we will wait less time than usual
 		bool additional_blocks_required = false;

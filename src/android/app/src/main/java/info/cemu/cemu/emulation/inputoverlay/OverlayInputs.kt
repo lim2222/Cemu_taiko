@@ -44,6 +44,11 @@ enum class OverlayTaiko : OverlayInput {
 	KA_LEFT,
 	KA_RIGHT,
 }
+
+// On-screen fast forward toggle. It is not an emulated controller input: it switches the emulation
+// speed, so it is available for every controller type.
+object OverlayFastForward : OverlayInput
+
 fun OverlayInput.toConfig(): OverlayInputConfig = when (this) {
     is OverlayButton -> when (this) {
         OverlayButton.A -> OverlayInputConfig.BUTTON_A
@@ -79,12 +84,15 @@ fun OverlayInput.toConfig(): OverlayInputConfig = when (this) {
 		OverlayTaiko.KA_LEFT -> OverlayInputConfig.TAIKO_KA_LEFT
 		OverlayTaiko.KA_RIGHT -> OverlayInputConfig.TAIKO_KA_RIGHT
 	}
+
+	OverlayFastForward -> OverlayInputConfig.FAST_FORWARD
 }
 
 // The overlay inputs that actually get drawn for a given emulated controller type.
 // Must stay in sync with InputOverlaySurfaceView.setInputs().
 fun overlayInputsForControllerType(controllerType: Int): List<OverlayInput> = when (controllerType) {
     NativeInput.EmulatedControllerType.TAIKO -> listOf(
+        OverlayFastForward,
         OverlayButton.MINUS,
         OverlayButton.PLUS,
         OverlayButton.ONE,
@@ -93,6 +101,7 @@ fun overlayInputsForControllerType(controllerType: Int): List<OverlayInput> = wh
     )
 
     NativeInput.EmulatedControllerType.WIIMOTE -> listOf(
+        OverlayFastForward,
         OverlayButton.MINUS,
         OverlayButton.PLUS,
         OverlayDpad.DPAD_UP,
@@ -107,6 +116,7 @@ fun overlayInputsForControllerType(controllerType: Int): List<OverlayInput> = wh
     )
 
     NativeInput.EmulatedControllerType.CLASSIC -> listOf(
+        OverlayFastForward,
         OverlayButton.MINUS,
         OverlayButton.PLUS,
         OverlayDpad.DPAD_UP,
@@ -126,6 +136,7 @@ fun overlayInputsForControllerType(controllerType: Int): List<OverlayInput> = wh
     NativeInput.EmulatedControllerType.VPAD,
     -> {
         val buttons = mutableListOf<OverlayInput>(
+            OverlayFastForward,
             OverlayButton.MINUS,
             OverlayButton.PLUS,
             OverlayDpad.DPAD_UP,

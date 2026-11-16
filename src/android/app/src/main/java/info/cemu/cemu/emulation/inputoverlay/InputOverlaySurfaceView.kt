@@ -26,6 +26,7 @@ import info.cemu.cemu.common.settings.OverlayInputConfig
 import info.cemu.cemu.common.settings.getDefaultRectangle
 import info.cemu.cemu.emulation.inputoverlay.inputs.Button
 import info.cemu.cemu.emulation.inputoverlay.inputs.DPad
+import info.cemu.cemu.emulation.inputoverlay.inputs.FastForwardButton
 import info.cemu.cemu.emulation.inputoverlay.inputs.Input
 import info.cemu.cemu.emulation.inputoverlay.inputs.Joystick
 import info.cemu.cemu.emulation.inputoverlay.inputs.RectangleButton
@@ -65,6 +66,14 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         { _, _, _, _, _ -> }
     private var overlyButtonToNativeButton: (OverlayInput) -> Int = { _ -> -1 }
     private var inputs: MutableList<Pair<OverlayInput, Input>> = mutableListOf()
+
+    // The fast forward toggle uses the two supplied images for the off/on state.
+    private val fastForwardDisabledBitmap by lazy {
+        BitmapFactory.decodeResource(resources, R.drawable.button_fast_forward_disabled)
+    }
+    private val fastForwardEnabledBitmap by lazy {
+        BitmapFactory.decodeResource(resources, R.drawable.button_fast_forward_enabled)
+    }
 
     // Buttons currently held down by each pointer, together with the buttons it has slid over.
     // Sliding from one button to another without lifting is handled here because Button.onTouch
@@ -570,6 +579,17 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         )
     }
 	
+	private fun MutableList<Pair<OverlayInput, Input>>.addFastForwardButton() {
+		add(
+			OverlayFastForward to FastForwardButton(
+				currentAlpha,
+				getBoundingRectangleForInput(OverlayFastForward),
+				fastForwardDisabledBitmap,
+				fastForwardEnabledBitmap,
+			)
+		)
+	}
+
 	private fun MutableList<Pair<OverlayInput, Input>>.addTaikoDrum() {
 		val drumBitmap = BitmapFactory.decodeResource(resources, R.drawable.tatacon)
 		add(
@@ -627,12 +647,14 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
             // Keep the set of inputs per controller type in sync with
             // overlayInputsForControllerType() in OverlayInputs.kt.
             if (nativeControllerType == NativeInput.EmulatedControllerType.TAIKO) {
+                addFastForwardButton()
                 addRoundButton(OverlayButton.MINUS, "-")
                 addRoundButton(OverlayButton.PLUS, "+")
                 addRoundButton(OverlayButton.ONE, "1")
                 addRoundButton(OverlayButton.TWO, "2")
 
                 val excludeRects = listOf(
+                    getBoundingRectangleForInput(OverlayFastForward),
                     getBoundingRectangleForInput(OverlayButton.MINUS),
                     getBoundingRectangleForInput(OverlayButton.PLUS),
                     getBoundingRectangleForInput(OverlayButton.ONE),
@@ -650,6 +672,7 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
                     )
                 )
             } else {
+                addFastForwardButton()
                 addRoundButton(OverlayButton.MINUS, "-")
                 addRoundButton(OverlayButton.PLUS, "+")
                 addDpad()

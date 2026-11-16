@@ -162,6 +162,8 @@ void LatteStreamout_FinishDrawcall(bool useDirectMemoryMode);
 
 void LatteTiming_Init();
 void LatteTiming_HandleTimedVsync();
+// called by the game thread when it requests a new scan buffer (used to detect stalled games for fast forward)
+void LatteTiming_NotifyFlipRequested();
 
 // command processor
 

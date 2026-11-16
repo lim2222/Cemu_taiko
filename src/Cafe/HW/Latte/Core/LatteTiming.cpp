@@ -5,9 +5,13 @@
 #endif
 #include "util/highresolutiontimer/HighResolutionTimer.h"
 #include "config/CemuConfig.h"
+#include "Common/FastForward.h"
 #include "Cafe/CafeSystem.h"
 
 sint32 s_customVsyncFrequency = -1;
+
+// How long a game may go without requesting a frame swap before fast forward is suspended.
+static constexpr uint64 FF_STALL_TICKS_MS = 1000;
 
 void LatteTiming_NotifyHostVSync();
 
@@ -29,7 +33,20 @@ HRTick LatteTime_CalculateTimeBetweenVSync()
 		tick /= 1002ull;
 		tick /= 60ull;
 	}
+	// Fast forward: emitting the emulated vsync events faster is what actually makes the game run
+	// ahead. The guest clock is scaled by the same factor (PPCTimer_getFromRDTSC), otherwise frame
+	// time and emulated time would drift apart.
+	const int speed = FastForward::GetEffectiveSpeed();
+	if (speed > 1)
+		tick /= (uint64)speed;
 	return tick;
+}
+
+// called by the game thread when it asks for a new scan buffer, used as the "is the game still
+// presenting anything?" signal for fast forward
+void LatteTiming_NotifyFlipRequested()
+{
+	FastForward::NotifyFlipRequested(HighResolutionTimer::now().getTick());
 }
 
 void LatteTiming_setCustomVsyncFrequency(sint32 frequency)
@@ -70,6 +87,8 @@ bool LatteTiming_IsUsingHostDrivenVSync()
 
 void LatteTiming_Init()
 {
+	FastForward::ResetFlipTimestamp();
+	FastForward::UpdateEffectiveSpeed(true); // no frame has been presented yet
 	LatteGPUState.timer_frequency = HighResolutionTimer::getFrequency();
 	LatteGPUState.timer_bootUp = HighResolutionTimer::now().getTick();
 	LatteGPUState.timer_nextVSync = LatteGPUState.timer_bootUp + LatteTime_CalculateTimeBetweenVSync();
@@ -157,6 +176,9 @@ void LatteTiming_HandleTimedVsync()
 {
 	// simulate VSync
 	uint64 currentTimer = HighResolutionTimer::now().getTick();
+	// suspend fast forward while the game is not presenting frames (loading, blocking on I/O)
+	static const HRTick s_ffStallTicks = HighResolutionTimer::microsecondsToTicks(FF_STALL_TICKS_MS * 1000);
+	FastForward::UpdateEffectiveSpeed(FastForward::IsStalled(currentTimer, s_ffStallTicks));
 	if( currentTimer >= LatteGPUState.timer_nextVSync )
 	{
 		if(!LatteTiming_IsUsingHostDrivenVSync())

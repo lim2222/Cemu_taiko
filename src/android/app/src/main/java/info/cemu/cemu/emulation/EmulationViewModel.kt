@@ -16,6 +16,7 @@ import info.cemu.cemu.common.either.bind
 import info.cemu.cemu.common.either.mapError
 import info.cemu.cemu.common.settings.AppSettings
 import info.cemu.cemu.common.settings.AppSettingsStore
+import info.cemu.cemu.common.settings.DEFAULT_FAST_FORWARD_SPEED
 import info.cemu.cemu.common.settings.EmulationSettings
 import info.cemu.cemu.common.settings.InputOverlayRect
 import info.cemu.cemu.common.settings.InputOverlaySettings
@@ -122,6 +123,8 @@ class EmulationViewModel(
             val settings = dataStore.data.first()
             overlayControllerIndex = settings.inputOverlaySettings.controllerIndex
             _controllerType.value = NativeInput.getControllerType(overlayControllerIndex)
+            // A game always starts at normal speed; only the multiplier is remembered.
+            FastForwardState.reset(settings.emulationSettings.fastForwardSpeed)
             _sideMenuState.update {
                 it.copy(
                     isPadOnExternalDisplay = settings.emulationSettings.isPadOnExternalDisplay,
@@ -344,6 +347,25 @@ class EmulationViewModel(
             SharingStarted.WhileSubscribed(5000),
             false,
         )
+
+    // Fast forward multiplier. The on/off state lives in FastForwardState and is not persisted.
+    val fastForwardSpeed = dataStore.data.map { it.emulationSettings.fastForwardSpeed }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            DEFAULT_FAST_FORWARD_SPEED,
+        )
+
+    fun setFastForwardSpeed(speed: Int) {
+        FastForwardState.setSpeed(speed)
+        viewModelScope.launch {
+            dataStore.updateData {
+                it.copy(
+                    emulationSettings = it.emulationSettings.copy(fastForwardSpeed = speed)
+                )
+            }
+        }
+    }
 
     fun setScreenOrientation(mode: ScreenOrientationMode) {
         updatePerGameDisplaySettings { it.copy(screenOrientation = mode) }

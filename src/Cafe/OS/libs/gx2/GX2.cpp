@@ -58,6 +58,7 @@ void gx2Export_GX2SwapScanBuffers(PPCInterpreter_t* hCPU)
 
 	GX2::GX2ReserveCmdSpace(5+2);
 
+	LatteTiming_NotifyFlipRequested();
 	uint64 tick64 = PPCInterpreter_getMainCoreCycleCounter() / 20ULL;
 	lastSwapTime = tick64;
 	// count flip request

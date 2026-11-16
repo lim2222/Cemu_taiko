@@ -1,5 +1,9 @@
 #include "IAudioAPI.h"
 
+#include <algorithm>
+
+#include "Common/FastForward.h"
+
 #if BOOST_OS_WINDOWS
 #include "XAudio2API.h"
 #include "XAudio27API.h"
@@ -24,6 +28,37 @@ IAudioAPI::IAudioAPI(uint32 samplerate, uint32 channels, uint32 samples_per_bloc
 {
 	m_bytesPerBlock = samples_per_block * channels * (bits_per_sample / 8);
 	InitWFX(m_samplerate, m_channels, m_bitsPerSample);
+}
+
+const sint16* IAudioAPI::ResampleForFastForward(const sint16* data, uint32& framesInOut)
+{
+	const uint32 speed = (uint32)FastForward::GetEffectiveSpeed();
+	if (speed <= 1 || framesInOut < 2 || m_channels == 0 || m_bitsPerSample != 16)
+		return data;
+
+	const uint32 channels = (uint32)m_channels;
+	const uint32 inFrames = framesInOut;
+	const uint32 outFrames = inFrames / speed;
+	if (outFrames < 1)
+		return data;
+
+	m_ffResampleBuffer.resize((size_t)outFrames * channels);
+	const double step = (double)inFrames / (double)outFrames;
+	for (uint32 i = 0; i < outFrames; i++)
+	{
+		const double position = (double)i * step;
+		const uint32 first = std::min((uint32)position, inFrames - 1);
+		const uint32 second = std::min(first + 1, inFrames - 1);
+		const float frac = (float)(position - (double)first);
+		for (uint32 c = 0; c < channels; c++)
+		{
+			const float a = data[(size_t)first * channels + c];
+			const float b = data[(size_t)second * channels + c];
+			m_ffResampleBuffer[(size_t)i * channels + c] = (sint16)(a + (b - a) * frac);
+		}
+	}
+	framesInOut = outFrames;
+	return m_ffResampleBuffer.data();
 }
 
 void IAudioAPI::PrintLogging()

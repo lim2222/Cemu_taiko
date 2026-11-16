@@ -219,6 +219,14 @@ fun defaultOverlayConfigFor(input: OverlayInputConfig): InputOverlayConfig {
             paddingVertical = 24,
             size = 200
         )
+
+        // Fast forward lives in the top-left corner for every controller type so it does not
+        // overlap the drum or the joysticks. It can be moved, resized or hidden like any input.
+        OverlayInputConfig.FAST_FORWARD -> InputOverlayConfig(
+            paddingHorizontal = 8,
+            paddingVertical = 8,
+            size = 40
+        )
     }
 }
 

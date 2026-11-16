@@ -102,5 +102,7 @@ fun InputOverlaySettingsScreen(
         VisibleInputToggle(tr("Right joystick"), OverlayInputConfig.JOYSTICK_RIGHT)
 
         VisibleInputToggle(tr("D-pad"), OverlayInputConfig.DPAD)
+
+        VisibleInputToggle(tr("Fast forward"), OverlayInputConfig.FAST_FORWARD)
     }
 }

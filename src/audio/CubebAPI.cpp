@@ -119,14 +119,20 @@ bool CubebAPI::NeedAdditionalBlocks() const
 
 bool CubebAPI::FeedBlock(sint16* data)
 {
+	// fast forward: hand the device a shorter block so the queue drains faster than the guest
+	// produces, keeping audio in sync with the accelerated guest clock
+	uint32 frames = m_samplesPerBlock;
+	const sint16* samples = ResampleForFastForward(data, frames);
+	const uint32 bytes = frames * (uint32)m_channels * (m_bitsPerSample / 8);
+
 	std::unique_lock lock(m_mutex);
-	if (m_buffer.capacity() <= m_buffer.size() + m_bytesPerBlock)
+	if (m_buffer.capacity() <= m_buffer.size() + bytes)
 	{
 		cemuLog_logDebug(LogType::Force, "dropped direct sound block since too many buffers are queued");
 		return false;
 	}
 
-	m_buffer.insert(m_buffer.end(), (uint8*)data, (uint8*)data + m_bytesPerBlock);
+	m_buffer.insert(m_buffer.end(), (uint8*)samples, (uint8*)samples + bytes);
 	return true;
 }
 

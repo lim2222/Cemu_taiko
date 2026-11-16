@@ -150,6 +150,13 @@ fun EmulationScreen(
     val perGameDisplaySettings by viewModel.perGameDisplaySettings.collectAsState()
     val globalDisplaySettings by viewModel.globalDisplaySettings.collectAsState()
     val isDisplaySettingsLoaded by viewModel.isDisplaySettingsLoaded.collectAsState()
+    val fastForwardSpeed by viewModel.fastForwardSpeed.collectAsState()
+
+    // The emulated process is shared with the rest of the app, so fast forward must not stay
+    // enabled after the game is closed.
+    DisposableEffect(Unit) {
+        onDispose { FastForwardState.setEnabled(false) }
+    }
 
     val screenOrientationMode =
         perGameDisplaySettings?.screenOrientation ?: globalDisplaySettings.screenOrientation
@@ -312,6 +319,8 @@ fun EmulationScreen(
                             )
                             closeDrawer()
                         },
+                        fastForwardSpeed = fastForwardSpeed,
+                        onFastForwardSpeedChanged = { viewModel.setFastForwardSpeed(it) },
                         updateState = {
                             viewModel.updateSideMenuState(it)
                             setMotionSensorEnabled(it.isMotionEnabled)
@@ -538,7 +547,12 @@ private fun overlayInputLabel(input: OverlayInputConfig, controllerType: Int): S
     OverlayInputConfig.TAIKO_DON_RIGHT -> tr("Taiko drum")
     OverlayInputConfig.TAIKO_KA_LEFT -> tr("Taiko drum")
     OverlayInputConfig.TAIKO_KA_RIGHT -> tr("Taiko drum")
+    OverlayInputConfig.FAST_FORWARD -> tr("Fast forward")
 }
+
+// Fast forward multipliers offered in the side menu. The on/off state is toggled by the
+// on-screen button; this only picks how much faster than normal time runs while it is on.
+private val FastForwardSpeeds = listOf(2, 3, 4)
 
 // Controller types that can be selected from the in-game side menu.
 private val SwitchableControllerTypes = listOf(
@@ -602,6 +616,8 @@ private fun EmulationSideMenuContent(
     isPadVisible: Boolean,
     onPadVisibleChanged: (Boolean) -> Unit,
     onControllerTypeChanged: (Int) -> Unit,
+    fastForwardSpeed: Int,
+    onFastForwardSpeedChanged: (Int) -> Unit,
     updateState: (SideMenuState) -> Unit,
     onShowEmulatedUSBDevices: () -> Unit,
     onEditInputOverlay: () -> Unit,
@@ -696,6 +712,14 @@ private fun EmulationSideMenuContent(
         checked = sideMenuState.isExternalScreenRotatedLeft,
         onCheckedChange = { updateState(sideMenuState.copy(isExternalScreenRotatedLeft = it)) },
         enabled = sideMenuState.isPadOnExternalDisplay,
+    )
+
+    SingleSelection(
+        label = tr("Fast forward speed"),
+        choice = fastForwardSpeed,
+        choices = FastForwardSpeeds,
+        choiceToString = { "${it}x" },
+        onChoiceChanged = onFastForwardSpeedChanged,
     )
 
     TextButtonItem(

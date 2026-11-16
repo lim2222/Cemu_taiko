@@ -35,7 +35,12 @@ data class EmulationSettings(
     val isPadVisibleLandscape: Boolean = false,
     val isPadOnExternalDisplay: Boolean = false,
     val isExternalScreenRotatedLeft: Boolean = false,
+    // Fast forward multiplier picked in the side menu. The on/off state is not persisted, so a
+    // game always starts at normal speed.
+    val fastForwardSpeed: Int = DEFAULT_FAST_FORWARD_SPEED,
 )
+
+const val DEFAULT_FAST_FORWARD_SPEED: Int = 3
 
 const val DEFAULT_SCREENS_GAP: Int = 2
 const val MAX_SCREENS_GAP: Int = 20
