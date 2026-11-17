@@ -16,6 +16,7 @@ import info.cemu.cemu.common.either.bind
 import info.cemu.cemu.common.either.mapError
 import info.cemu.cemu.common.settings.AppSettings
 import info.cemu.cemu.common.settings.AppSettingsStore
+import info.cemu.cemu.common.settings.CustomScreensLayout
 import info.cemu.cemu.common.settings.DEFAULT_FAST_FORWARD_SPEED
 import info.cemu.cemu.common.settings.DEFAULT_SLOW_MOTION_DIVISOR
 import info.cemu.cemu.common.settings.EmulationSettings
@@ -25,6 +26,7 @@ import info.cemu.cemu.common.settings.InputOverlaySlideMode
 import info.cemu.cemu.common.settings.OverlayInputConfig
 import info.cemu.cemu.common.settings.PerGameDisplaySettings
 import info.cemu.cemu.common.settings.ScreenOrientationMode
+import info.cemu.cemu.common.settings.ScreenRect
 import info.cemu.cemu.common.settings.ScreensLayout
 import info.cemu.cemu.common.settings.inputOverlayAlphaKey
 import info.cemu.cemu.common.settings.inputOverlayKey
@@ -409,6 +411,56 @@ class EmulationViewModel(
 
     fun setScreensYOffsetPortrait(offset: Int) {
         updatePerGameDisplaySettings { it.copy(screensYOffsetPortrait = offset) }
+    }
+
+    // null restores the automatic layout (the screens are arranged by the layout, gap and offset
+    // settings again).
+    fun setCustomScreensLayout(isPortrait: Boolean, layout: CustomScreensLayout?) {
+        updatePerGameDisplaySettings {
+            if (isPortrait) it.copy(customScreensLayoutPortrait = layout)
+            else it.copy(customScreensLayoutLandscape = layout)
+        }
+    }
+
+    // Edits one screen of the numeric layout. The change is applied to the value that is stored
+    // right now rather than to the copy the UI last saw, so typing into several fields quickly
+    // cannot undo an earlier edit that was not read back yet. The stored value may still be the
+    // global one at this point, so the whole settings object is available here.
+    fun updateCustomScreenRect(
+        isPortrait: Boolean,
+        isTv: Boolean,
+        transform: (ScreenRect) -> ScreenRect,
+    ) {
+        viewModelScope.launch {
+            dataStore.updateData { settings ->
+                val perGame =
+                    settings.displaySettingsByGame[launchPath] ?: PerGameDisplaySettings()
+                val current = if (isPortrait) {
+                    perGame.customScreensLayoutPortrait
+                        ?: settings.emulationSettings.customScreensLayoutPortrait
+                } else {
+                    perGame.customScreensLayoutLandscape
+                        ?: settings.emulationSettings.customScreensLayoutLandscape
+                } ?: return@updateData settings
+
+                val updated = if (isTv) {
+                    current.copy(tv = transform(current.tv).coerced())
+                } else {
+                    current.copy(pad = transform(current.pad).coerced())
+                }
+
+                val updatedPerGame = if (isPortrait) {
+                    perGame.copy(customScreensLayoutPortrait = updated)
+                } else {
+                    perGame.copy(customScreensLayoutLandscape = updated)
+                }
+
+                settings.copy(
+                    displaySettingsByGame =
+                        settings.displaySettingsByGame + (launchPath to updatedPerGame),
+                )
+            }
+        }
     }
 
     private fun updatePerGameDisplaySettings(

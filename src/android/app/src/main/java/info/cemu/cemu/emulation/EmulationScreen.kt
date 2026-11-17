@@ -6,10 +6,15 @@ import android.content.Context
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.view.Display
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.View
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,11 +23,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -31,6 +40,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.SnackbarHost
@@ -42,23 +52,36 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -66,12 +89,16 @@ import androidx.lifecycle.viewmodel.MutableCreationExtras
 import androidx.lifecycle.viewmodel.compose.viewModel
 import info.cemu.cemu.R
 import info.cemu.cemu.common.android.display.DisplayUtils
+import info.cemu.cemu.common.settings.CustomScreensLayout
 import info.cemu.cemu.common.settings.HotkeyAction
 import info.cemu.cemu.common.settings.InputOverlaySlideMode
 import info.cemu.cemu.common.settings.MAX_SCREENS_GAP
 import info.cemu.cemu.common.settings.MAX_SCREENS_Y_OFFSET
 import info.cemu.cemu.common.settings.MIN_SCREENS_Y_OFFSET
+import info.cemu.cemu.common.settings.SCREEN_RECT_MAX
+import info.cemu.cemu.common.settings.SCREEN_RECT_MIN_SIZE
 import info.cemu.cemu.common.settings.ScreenOrientationMode
+import info.cemu.cemu.common.settings.ScreenRect
 import info.cemu.cemu.common.settings.ScreensLayout
 import info.cemu.cemu.common.settings.inputOverlayAlphaKey
 import info.cemu.cemu.common.settings.inputOverlayKey
@@ -93,6 +120,7 @@ import info.cemu.cemu.emulation.inputoverlay.InputOverlaySurfaceView.InputMode.E
 import info.cemu.cemu.nativeinterface.NativeEmulation
 import info.cemu.cemu.nativeinterface.NativeInput
 import info.cemu.cemu.nativeinterface.NativeSettings
+import java.util.Locale
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
@@ -118,7 +146,18 @@ fun EmulationScreen(
     var showQuitConfirmationDialog by remember { mutableStateOf(false) }
     var inputOverlayInputMode by rememberSaveable { mutableStateOf(DEFAULT) }
     var showEmulatedUSBDevices by remember { mutableStateOf(false) }
+    // Size of the area the TV / GamePad screens are drawn in. Only used to prefill the numeric
+    // layout, so switching to it starts exactly where the automatic layout put the screens.
+    var emulationAreaSize by remember { mutableStateOf(IntSize.Zero) }
     var showInputVisibilityDialog by remember { mutableStateOf(false) }
+    // The gesture based screen layout editor. While it is open the screens can be dragged around
+    // with a finger and the touches go to the editor instead of the game.
+    var isScreenLayoutEditMode by remember { mutableStateOf(false) }
+    var screenEditMode by remember { mutableStateOf(ScreenLayoutEditMode.MOVE) }
+    var selectedScreenIsTv by remember { mutableStateOf(true) }
+    // Live layout while a screen is dragged. It is only written to the settings once the finger is
+    // lifted, so dragging does not resize the surfaces or hit the data store on every frame.
+    var screenLayoutPreview by remember { mutableStateOf<CustomScreensLayout?>(null) }
 
     val emulationError by viewModel.emulationError.collectAsState()
     val isEmulationInitialized by viewModel.isEmulationInitialized.collectAsState()
@@ -177,6 +216,16 @@ fun EmulationScreen(
     val screensYOffsetPortrait = perGameDisplaySettings?.screensYOffsetPortrait
         ?: globalDisplaySettings.screensYOffsetPortrait
 
+    // Numeric screen layout. When set, the user placed the screens by hand and the automatic
+    // layout above is ignored. Each orientation keeps its own arrangement.
+    val customScreensLayout = if (isPortrait) {
+        perGameDisplaySettings?.customScreensLayoutPortrait
+            ?: globalDisplaySettings.customScreensLayoutPortrait
+    } else {
+        perGameDisplaySettings?.customScreensLayoutLandscape
+            ?: globalDisplaySettings.customScreensLayoutLandscape
+    }
+
     // Whether the GamePad screen is shown. It is stored per game and per orientation, like the
     // TV/GamePad layout, because a screen that is hidden in portrait (where both would not fit)
     // can still be shown in landscape, and games can differ.
@@ -218,13 +267,23 @@ fun EmulationScreen(
         }
     }
 
+    // The GamePad screen is either shown in the emulation area or on an external display. Both the
+    // surfaces and the layout editor need the same answer, so it is decided here.
+    val padDisplay = if (activity != null) rememberPadDisplay(activity) else null
+    val isPadVisibleEffective = isPadVisible && isEmulationInitialized
+    val usePadPresentation =
+        isPadVisibleEffective && sideMenuState.isPadOnExternalDisplay && padDisplay != null
+    val isPadShownInContainer = isPadVisibleEffective && !usePadPresentation
+
     // The surface is 4:3 in portrait and 16:9 in landscape. In landscape that already matches
     // most titles, so the user's fullscreen scaling setting is kept; in portrait the game has to
-    // be stretched (non proportionally) to fill the 4:3 area.
+    // be stretched (non proportionally) to fill the 4:3 area. A numeric layout can have any shape,
+    // so the game is stretched to fill exactly the rect that was entered instead of leaving black
+    // bars inside of it.
     val storedFullscreenScaling = remember { NativeSettings.getFullscreenScaling() }
-    LaunchedEffect(isPortrait) {
+    LaunchedEffect(isPortrait, customScreensLayout) {
         NativeSettings.setFullscreenScaling(
-            if (isPortrait) {
+            if (isPortrait || customScreensLayout != null) {
                 NativeSettings.FullscreenScaling.STRETCH
             } else {
                 storedFullscreenScaling
@@ -248,6 +307,37 @@ fun EmulationScreen(
         }
     }
 
+    // Leaving the editor accepts nothing new; the last committed layout stays.
+    fun stopScreenLayoutEditing() {
+        isScreenLayoutEditMode = false
+        screenLayoutPreview = null
+    }
+
+    // Opens the gesture editor. A game that still uses the automatic arrangement first gets a
+    // numeric layout that matches it exactly, so the screens do not jump when editing starts.
+    fun startScreenLayoutEditing() {
+        if (customScreensLayout == null) {
+            viewModel.setCustomScreensLayout(
+                isPortrait,
+                automaticCustomScreensLayout(
+                    containerSize = emulationAreaSize,
+                    layout = screensLayout,
+                    gap = screensGap,
+                    yOffsetPercent = if (isPortrait) screensYOffsetPortrait else 0,
+                    targetAspectRatio = targetAspectRatio,
+                    isMainTv = !sideMenuState.areScreensSwapped,
+                    isPadTv = sideMenuState.areScreensSwapped,
+                    hasPad = isPadShownInContainer,
+                ),
+            )
+        }
+        screenEditMode = ScreenLayoutEditMode.MOVE
+        selectedScreenIsTv = true
+        screenLayoutPreview = null
+        isScreenLayoutEditMode = true
+        closeDrawer()
+    }
+
     BackHandler {
         if (drawerState.isAnimationRunning) {
             return@BackHandler
@@ -255,6 +345,20 @@ fun EmulationScreen(
 
         scope.launch {
             toggleMenu()
+        }
+    }
+
+    // Registered after the menu handler on purpose: the latest enabled handler wins, so back
+    // closes the editor before it opens the menu.
+    BackHandler(enabled = isScreenLayoutEditMode) {
+        stopScreenLayoutEditing()
+    }
+
+    // Once the editor's drag has been written to the settings, the preview is the same as the
+    // stored layout again and can be dropped.
+    LaunchedEffect(screenLayoutPreview, customScreensLayout) {
+        if (screenLayoutPreview != null && screenLayoutPreview == customScreensLayout) {
+            screenLayoutPreview = null
         }
     }
 
@@ -311,6 +415,13 @@ fun EmulationScreen(
                         onScreensYOffsetPortraitChanged = {
                             viewModel.setScreensYOffsetPortrait(it)
                         },
+                        customScreensLayout = customScreensLayout,
+                        // Only an explicit reset clears a hand-placed layout. The old checkbox made
+                        // it too easy to lose a finger-adjusted layout by accidentally unticking it.
+                        onResetCustomScreensLayout = {
+                            viewModel.setCustomScreensLayout(isPortrait, null)
+                        },
+                        onEditScreenLayout = { startScreenLayoutEditing() },
                         isPadVisible = isPadVisible,
                         onPadVisibleChanged = { viewModel.setPadVisible(isPortrait, it) },
                         onControllerTypeChanged = { controllerType ->
@@ -368,17 +479,23 @@ fun EmulationScreen(
         if (hasSurfacesBeenCreated) {
             EmulationSurfaces(
                 viewModel = viewModel,
-                isEmulationInitialized = isEmulationInitialized,
                 screensLayout = screensLayout,
                 screensGap = screensGap,
                 screensYOffsetPercent = if (isPortrait) screensYOffsetPortrait else 0,
-                isPadVisible = isPadVisible,
+                isPadShownInContainer = isPadShownInContainer,
+                usePadPresentation = usePadPresentation,
+                padDisplay = padDisplay,
                 targetAspectRatio = targetAspectRatio,
+                customScreensLayout = customScreensLayout,
+                screenLayoutPreview = screenLayoutPreview,
+                containerSize = emulationAreaSize,
+                isScreenLayoutEditMode = isScreenLayoutEditMode,
+                onContainerSizeChanged = { emulationAreaSize = it },
             )
         }
 
         InputOverlaySurface(
-            isVisible = isInputOverlayVisible,
+            isVisible = isInputOverlayVisible && !isScreenLayoutEditMode,
             inputOverlaySettings = inputOverlaySettings,
             controllerType = inputOverlayControllerType,
             inputMode = inputOverlayInputMode,
@@ -389,6 +506,38 @@ fun EmulationScreen(
                 scope.launch { toggleMenu() }
             },
         )
+
+        if (isScreenLayoutEditMode && customScreensLayout != null) {
+            ScreenLayoutEditor(
+                containerSize = emulationAreaSize,
+                layout = screenLayoutPreview ?: customScreensLayout,
+                areScreensSwapped = sideMenuState.areScreensSwapped,
+                isPadShown = isPadShownInContainer,
+                editMode = screenEditMode,
+                selectedScreenIsTv = selectedScreenIsTv,
+                onSelectScreen = { selectedScreenIsTv = it },
+                onModeChanged = { screenEditMode = it },
+                onLayoutChanged = { screenLayoutPreview = it },
+                onDragFinished = {
+                    screenLayoutPreview?.let { viewModel.setCustomScreensLayout(isPortrait, it) }
+                },
+                onReset = {
+                    val layout = automaticCustomScreensLayout(
+                        containerSize = emulationAreaSize,
+                        layout = screensLayout,
+                        gap = screensGap,
+                        yOffsetPercent = if (isPortrait) screensYOffsetPortrait else 0,
+                        targetAspectRatio = targetAspectRatio,
+                        isMainTv = !sideMenuState.areScreensSwapped,
+                        isPadTv = sideMenuState.areScreensSwapped,
+                        hasPad = isPadShownInContainer,
+                    )
+                    screenLayoutPreview = layout
+                    viewModel.setCustomScreensLayout(isPortrait, layout)
+                },
+                onDone = { stopScreenLayoutEditing() },
+            )
+        }
 
         if (inputOverlayInputMode != DEFAULT) {
             EditInputsLayout(
@@ -624,6 +773,9 @@ private fun EmulationSideMenuContent(
     isPortrait: Boolean,
     screensYOffsetPortrait: Int,
     onScreensYOffsetPortraitChanged: (Int) -> Unit,
+    customScreensLayout: CustomScreensLayout?,
+    onResetCustomScreensLayout: () -> Unit,
+    onEditScreenLayout: () -> Unit,
     isPadVisible: Boolean,
     onPadVisibleChanged: (Boolean) -> Unit,
     onControllerTypeChanged: (Int) -> Unit,
@@ -668,6 +820,8 @@ private fun EmulationSideMenuContent(
         choices = ScreensLayout.entries,
         choiceToString = { screensLayoutToString(it) },
         onChoiceChanged = onScreensLayoutChanged,
+        // The numeric layout places the screens by hand, so the automatic arrangement is ignored.
+        enabled = customScreensLayout == null,
     )
 
     Slider(
@@ -677,6 +831,7 @@ private fun EmulationSideMenuContent(
         valueTo = MAX_SCREENS_GAP,
         labelFormatter = { "$it%" },
         onValueChange = onScreensGapChanged,
+        enabled = customScreensLayout == null,
     )
 
     Slider(
@@ -686,8 +841,20 @@ private fun EmulationSideMenuContent(
         valueTo = MAX_SCREENS_Y_OFFSET,
         labelFormatter = { "$it%" },
         onValueChange = onScreensYOffsetPortraitChanged,
-        enabled = isPortrait,
+        enabled = isPortrait && customScreensLayout == null,
     )
+
+    TextButtonItem(
+        label = tr("Edit screen layout"),
+        onClick = onEditScreenLayout,
+    )
+
+    if (customScreensLayout != null) {
+        TextButtonItem(
+            label = tr("Reset screen layout"),
+            onClick = onResetCustomScreensLayout,
+        )
+    }
 
     CheckboxItem(
         label = tr("Enable motion"),
@@ -855,26 +1022,477 @@ private fun TextButtonItem(
     )
 }
 
+// One screen of the numeric layout: position (X/Y) and size (W/H) in percent, typed by the user.
+// The callback receives a change of the whole rect instead of a new rect, so it can be applied to
+// the value that is stored at that moment.
+@Composable
+private fun ScreenRectEditor(
+    label: String,
+    rect: ScreenRect,
+    onRectChanged: ((ScreenRect) -> ScreenRect) -> Unit,
+) {
+    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Text(text = label, fontSize = 14.sp)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            PercentField(
+                label = "X",
+                permille = rect.x,
+                modifier = Modifier.weight(1f),
+                onValueChange = { value -> onRectChanged { it.copy(x = value) } },
+            )
+            PercentField(
+                label = "Y",
+                permille = rect.y,
+                modifier = Modifier.weight(1f),
+                onValueChange = { value -> onRectChanged { it.copy(y = value) } },
+            )
+            PercentField(
+                label = "W",
+                permille = rect.width,
+                modifier = Modifier.weight(1f),
+                onValueChange = { value -> onRectChanged { it.copy(width = value) } },
+            )
+            PercentField(
+                label = "H",
+                permille = rect.height,
+                modifier = Modifier.weight(1f),
+                onValueChange = { value -> onRectChanged { it.copy(height = value) } },
+            )
+        }
+    }
+}
+
+private val PERCENT_INPUT_REGEX = Regex("""\d{0,3}([.,]\d?)?""")
+
+// The value is stored in tenths of a percent but the user types percent, e.g. 42.5. Only the text
+// is kept while the field is focused, so typing "42." does not get rewritten to "42" under the
+// cursor; when the field loses focus it is normalized to the value that was applied.
+@Composable
+private fun PercentField(
+    label: String,
+    permille: Int,
+    modifier: Modifier = Modifier,
+    onValueChange: (Int) -> Unit,
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf(percentToString(permille)) }
+
+    LaunchedEffect(permille, isFocused) {
+        if (!isFocused) {
+            text = percentToString(permille)
+        }
+    }
+
+    Column(modifier = modifier) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        BasicTextField(
+            value = text,
+            onValueChange = { input ->
+                if (!PERCENT_INPUT_REGEX.matches(input)) {
+                    return@BasicTextField
+                }
+
+                text = input
+                val percent = input.replace(',', '.').toFloatOrNull()
+                    ?: return@BasicTextField
+
+                onValueChange((percent * 10f).roundToInt().coerceIn(0, SCREEN_RECT_MAX))
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { isFocused = it.isFocused }
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(6.dp),
+                )
+                .padding(vertical = 6.dp, horizontal = 4.dp),
+            textStyle = TextStyle(
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        )
+    }
+}
+
+private fun percentToString(permille: Int): String =
+    if (permille % 10 == 0) {
+        (permille / 10).toString()
+    } else {
+        String.format(Locale.US, "%.1f", permille / 10f)
+    }
+
+private enum class ScreenLayoutEditMode { MOVE, RESIZE }
+
+// Moves a rect by a drag in pixels and keeps it fully inside of the emulation area.
+private fun ScreenRect.movedByPixels(
+    dx: Float,
+    dy: Float,
+    containerWidth: Int,
+    containerHeight: Int,
+): ScreenRect {
+    val maxX = (SCREEN_RECT_MAX - width).coerceAtLeast(0)
+    val maxY = (SCREEN_RECT_MAX - height).coerceAtLeast(0)
+
+    return copy(
+        x = (x + dx * SCREEN_RECT_MAX / containerWidth).roundToInt().coerceIn(0, maxX),
+        y = (y + dy * SCREEN_RECT_MAX / containerHeight).roundToInt().coerceIn(0, maxY),
+    )
+}
+
+// Resizes a rect around its center: a horizontal drag moves the left and right edge apart by the
+// same amount (the edge under the finger follows it) and a vertical drag does the same for the top
+// and bottom edge. The result always stays inside of the emulation area.
+private fun ScreenRect.resizedByPixels(
+    dx: Float,
+    dy: Float,
+    containerWidth: Int,
+    containerHeight: Int,
+): ScreenRect {
+    val dxPermille = (dx * SCREEN_RECT_MAX / containerWidth).roundToInt()
+    val dyPermille = (dy * SCREEN_RECT_MAX / containerHeight).roundToInt()
+
+    var newWidth = width + 2 * dxPermille
+    var newX = x - dxPermille
+    if (newX < 0) {
+        newWidth += newX
+        newX = 0
+    }
+    if (newX + newWidth > SCREEN_RECT_MAX) {
+        newWidth = SCREEN_RECT_MAX - newX
+    }
+    newWidth = newWidth.coerceIn(SCREEN_RECT_MIN_SIZE, SCREEN_RECT_MAX)
+    newX = newX.coerceIn(0, SCREEN_RECT_MAX - newWidth)
+
+    var newHeight = height + 2 * dyPermille
+    var newY = y - dyPermille
+    if (newY < 0) {
+        newHeight += newY
+        newY = 0
+    }
+    if (newY + newHeight > SCREEN_RECT_MAX) {
+        newHeight = SCREEN_RECT_MAX - newY
+    }
+    newHeight = newHeight.coerceIn(SCREEN_RECT_MIN_SIZE, SCREEN_RECT_MAX)
+    newY = newY.coerceIn(0, SCREEN_RECT_MAX - newHeight)
+
+    return ScreenRect(x = newX, y = newY, width = newWidth, height = newHeight)
+}
+
+private fun screenIsTv(index: Int, areScreensSwapped: Boolean): Boolean =
+    (index == 0) != areScreensSwapped
+
+// The editor needs a real Android touch target: Compose's interop dispatch forwards touches on an
+// AndroidView (the emulation surfaces) to that View before Compose pointer input modifiers are
+// reached. A transparent View above the surfaces is therefore used for the drag gestures.
+@SuppressLint("ClickableViewAccessibility")
+private class ScreenLayoutGestureListener(
+    private val getLayout: () -> CustomScreensLayout,
+    private val getRects: () -> List<ScreenRect>,
+    private val getContainerSize: () -> IntSize,
+    private val areScreensSwapped: () -> Boolean,
+    private val getMode: () -> ScreenLayoutEditMode,
+    private val onSelectScreen: (Boolean) -> Unit,
+    private val onLayoutChanged: (CustomScreensLayout) -> Unit,
+    private val onDragFinished: () -> Unit,
+) : View.OnTouchListener {
+    private var activePointerId = -1
+    private var startX = 0f
+    private var startY = 0f
+    private var startRect: ScreenRect? = null
+    private var startIsTv = false
+    private var startLayout: CustomScreensLayout? = null
+
+    override fun onTouch(v: View, event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (activePointerId != -1) {
+                    return false
+                }
+
+                val size = getContainerSize()
+                if (size.width <= 0 || size.height <= 0) {
+                    return false
+                }
+
+                val rects = getRects()
+                var hitIndex = -1
+                for (index in rects.indices.reversed()) {
+                    val box = screenRectToBox(rects[index], size.width, size.height)
+                    if (event.x >= box.x && event.x <= box.x + box.width &&
+                        event.y >= box.y && event.y <= box.y + box.height
+                    ) {
+                        hitIndex = index
+                        break
+                    }
+                }
+                if (hitIndex == -1) {
+                    return false
+                }
+
+                activePointerId = event.getPointerId(0)
+                startX = event.x
+                startY = event.y
+                startLayout = getLayout()
+                startRect = rects[hitIndex]
+                startIsTv = screenIsTv(hitIndex, areScreensSwapped())
+                onSelectScreen(startIsTv)
+                return true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (activePointerId == -1) {
+                    return false
+                }
+                val index = event.findPointerIndex(activePointerId)
+                if (index == -1) {
+                    return true
+                }
+
+                val rect = startRect ?: return true
+                val layout = startLayout ?: return true
+                val size = getContainerSize()
+                val dx = event.getX(index) - startX
+                val dy = event.getY(index) - startY
+
+                val updated = if (getMode() == ScreenLayoutEditMode.MOVE) {
+                    rect.movedByPixels(dx, dy, size.width, size.height)
+                } else {
+                    rect.resizedByPixels(dx, dy, size.width, size.height)
+                }
+
+                onLayoutChanged(
+                    if (startIsTv) layout.copy(tv = updated) else layout.copy(pad = updated)
+                )
+                return true
+            }
+
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+                if (activePointerId == -1) {
+                    return false
+                }
+                val index = event.findPointerIndex(activePointerId)
+                if (index != -1 && event.getPointerId(index) != activePointerId) {
+                    return true
+                }
+
+                activePointerId = -1
+                startRect = null
+                startLayout = null
+                onDragFinished()
+                return true
+            }
+        }
+
+        return false
+    }
+}
+
+// Full screen editor drawn above the emulation surfaces. A finger down on a screen selects it; in
+// MOVE the screen follows the finger, in RESIZE a horizontal drag changes its width and a vertical
+// drag its height. The bar at the top switches the mode, resets the automatic arrangement and
+// closes the editor; it can be dragged out of the way with the grip.
+@Composable
+private fun ScreenLayoutEditor(
+    containerSize: IntSize,
+    layout: CustomScreensLayout,
+    areScreensSwapped: Boolean,
+    isPadShown: Boolean,
+    editMode: ScreenLayoutEditMode,
+    selectedScreenIsTv: Boolean,
+    onSelectScreen: (Boolean) -> Unit,
+    onModeChanged: (ScreenLayoutEditMode) -> Unit,
+    onLayoutChanged: (CustomScreensLayout) -> Unit,
+    onDragFinished: () -> Unit,
+    onReset: () -> Unit,
+    onDone: () -> Unit,
+) {
+    // The gesture handler is not restarted while a screen is dragged, so it has to read everything
+    // through updated states: the preview changes on every drag event.
+    val currentLayout by rememberUpdatedState(layout)
+    val currentEditMode by rememberUpdatedState(editMode)
+    val currentSwapped by rememberUpdatedState(areScreensSwapped)
+    val currentPadShown by rememberUpdatedState(isPadShown)
+    val currentSize by rememberUpdatedState(containerSize)
+    val currentOnSelectScreen by rememberUpdatedState(onSelectScreen)
+    val currentOnLayoutChanged by rememberUpdatedState(onLayoutChanged)
+    val currentOnDragFinished by rememberUpdatedState(onDragFinished)
+
+    // Created once and kept across recompositions so a drag is not interrupted by the preview
+    // updates it produces. All values are read through the updated states above.
+    val gestureListener = remember {
+        ScreenLayoutGestureListener(
+            getLayout = { currentLayout },
+            getRects = {
+                currentLayout.visibleScreenRects(
+                    isMainTv = !currentSwapped,
+                    isPadTv = currentSwapped,
+                    isPadShown = currentPadShown,
+                )
+            },
+            getContainerSize = { currentSize },
+            areScreensSwapped = { currentSwapped },
+            getMode = { currentEditMode },
+            onSelectScreen = { currentOnSelectScreen(it) },
+            onLayoutChanged = { currentOnLayoutChanged(it) },
+            onDragFinished = { currentOnDragFinished() },
+        )
+    }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val outlineColor = Color.White.copy(alpha = 0.75f)
+    var barOffset by remember { mutableStateOf(Offset.Zero) }
+
+    val hasSize = containerSize.width > 0 && containerSize.height > 0
+    val boxes = if (hasSize) {
+        layout.visibleScreenRects(
+            isMainTv = !areScreensSwapped,
+            isPadTv = areScreensSwapped,
+            isPadShown = isPadShown,
+        ).map { screenRectToBox(it, containerSize.width, containerSize.height) }
+    } else {
+        emptyList()
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            boxes.forEachIndexed { index, box ->
+                val isSelected = screenIsTv(index, areScreensSwapped) == selectedScreenIsTv
+                drawRect(
+                    color = if (isSelected) primaryColor else outlineColor,
+                    topLeft = Offset(box.x.toFloat(), box.y.toFloat()),
+                    size = Size(box.width.toFloat(), box.height.toFloat()),
+                    style = Stroke(width = if (isSelected) 4.dp.toPx() else 2.dp.toPx()),
+                )
+            }
+        }
+
+        // A SurfaceView's interop touch filter consumes touches before Compose pointer input sees
+        // them, so the screens need a real View hit target. This transparent View sits above the
+        // surfaces and below the control bar, so the bar buttons still receive their own clicks.
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { context ->
+                View(context).apply {
+                    setOnTouchListener(gestureListener)
+                }
+            },
+        )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset { IntOffset(barOffset.x.roundToInt(), barOffset.y.roundToInt()) }
+                .padding(8.dp)
+                .background(Color(0xCC101010), RoundedCornerShape(10.dp))
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "⠿",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        modifier = Modifier
+                            .pointerInput(Unit) {
+                                detectDragGestures { change, dragAmount ->
+                                    change.consume()
+                                    barOffset += dragAmount
+                                }
+                            }
+                            .padding(horizontal = 10.dp),
+                    )
+
+                    TextButton(onClick = { onModeChanged(ScreenLayoutEditMode.MOVE) }) {
+                        Text(
+                            text = tr("Move screen"),
+                            fontSize = 14.sp,
+                            color = if (editMode == ScreenLayoutEditMode.MOVE) primaryColor
+                            else Color.White,
+                        )
+                    }
+
+                    TextButton(onClick = { onModeChanged(ScreenLayoutEditMode.RESIZE) }) {
+                        Text(
+                            text = tr("Screen size"),
+                            fontSize = 14.sp,
+                            color = if (editMode == ScreenLayoutEditMode.RESIZE) primaryColor
+                            else Color.White,
+                        )
+                    }
+
+                    TextButton(onClick = onReset) {
+                        Text(text = tr("Reset"), fontSize = 14.sp, color = Color.White)
+                    }
+
+                    TextButton(onClick = onDone) {
+                        Text(text = tr("Done"), fontSize = 14.sp, color = Color.White)
+                    }
+                }
+
+                val selectedRect = if (selectedScreenIsTv) layout.tv else layout.pad
+                Text(
+                    text = tr(if (selectedScreenIsTv) "TV" else "GamePad") +
+                        ":  X " + percentToString(selectedRect.x) +
+                        "  Y " + percentToString(selectedRect.y) +
+                        "  W " + percentToString(selectedRect.width) +
+                        "  H " + percentToString(selectedRect.height),
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.85f),
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+            }
+        }
+
+        Text(
+            text = tr(
+                if (editMode == ScreenLayoutEditMode.MOVE) {
+                    "Drag the TV or GamePad screen to move it"
+                } else {
+                    "Drag horizontally to change the width, vertically to change the height"
+                }
+            ),
+            fontSize = 12.sp,
+            color = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 24.dp)
+                .background(Color(0xAA000000), RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    }
+}
+
 @Composable
 private fun EmulationSurfaces(
     viewModel: EmulationViewModel,
-    isEmulationInitialized: Boolean,
     screensLayout: ScreensLayout,
     screensGap: Int,
     screensYOffsetPercent: Int,
-    isPadVisible: Boolean,
+    isPadShownInContainer: Boolean,
+    usePadPresentation: Boolean,
+    padDisplay: Display?,
     targetAspectRatio: Float,
+    customScreensLayout: CustomScreensLayout?,
+    screenLayoutPreview: CustomScreensLayout?,
+    containerSize: IntSize,
+    isScreenLayoutEditMode: Boolean,
+    onContainerSizeChanged: (IntSize) -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
     val sideMenuState by viewModel.sideMenuState.collectAsState()
     val mainSurfaceDimensions by viewModel.mainSurfaceDimensions.collectAsState()
     val padSurfaceDimensions by viewModel.padSurfaceDimensions.collectAsState()
-
-    val padDisplay = if (activity != null) rememberPadDisplay(activity) else null
-    val isPadVisibleEffective = isPadVisible && isEmulationInitialized
-    val usePadPresentation =
-        isPadVisibleEffective && sideMenuState.isPadOnExternalDisplay && padDisplay != null
 
     val mainTouchListener = remember { CanvasOnTouchListener() }
     val padTouchListener = remember { CanvasOnTouchListener() }
@@ -904,7 +1522,7 @@ private fun EmulationSurfaces(
         if (!usePadPresentation) {
             return@DisposableEffect onDispose {}
         }
-        val padDisplayNonNull = padDisplay
+        val padDisplayNonNull = padDisplay ?: return@DisposableEffect onDispose {}
 
         NativeEmulation.setExternalScreenRotatedLeft(sideMenuState.isExternalScreenRotatedLeft)
 
@@ -921,11 +1539,54 @@ private fun EmulationSurfaces(
         onDispose { padPresentation.dismiss() }
     }
 
+    // Rects of the screens that are in the emulation area, in the order of the layout container.
+    val storedRects = customScreensLayout?.visibleScreenRects(
+        isMainTv = isMainTargetingTV,
+        isPadTv = isPadTargetingTV,
+        isPadShown = isPadShownInContainer,
+    )
+    val previewRects = screenLayoutPreview?.visibleScreenRects(
+        isMainTv = isMainTargetingTV,
+        isPadTv = isPadTargetingTV,
+        isPadShown = isPadShownInContainer,
+    )
+
+    // While a screen is dragged only a View transform is applied: the SurfaceView keeps its size
+    // (so the native surface is not resized on every frame) and is just scaled/translated. The
+    // real layout is written down once the finger is lifted.
+    fun screenViewTransform(index: Int): ScreenViewTransform? {
+        if (screenLayoutPreview == null || containerSize.width <= 0 ||
+            containerSize.height <= 0
+        ) {
+            return null
+        }
+
+        val stored = storedRects?.getOrNull(index) ?: return null
+        val preview = previewRects?.getOrNull(index) ?: return null
+        if (stored == preview) {
+            return null
+        }
+
+        val storedBox = screenRectToBox(stored, containerSize.width, containerSize.height)
+        val previewBox = screenRectToBox(preview, containerSize.width, containerSize.height)
+
+        return ScreenViewTransform(
+            scaleX = previewBox.width.toFloat() / storedBox.width,
+            scaleY = previewBox.height.toFloat() / storedBox.height,
+            translationX = (previewBox.x + previewBox.width / 2f) -
+                (storedBox.x + storedBox.width / 2f),
+            translationY = (previewBox.y + previewBox.height / 2f) -
+                (storedBox.y + storedBox.height / 2f),
+        )
+    }
+
     ScreensLayoutContainer(
         isVertical = screensLayout.isVertical(),
         gapPercent = screensGap,
         yOffsetPercent = screensYOffsetPercent,
         targetAspectRatio = targetAspectRatio,
+        customRects = storedRects,
+        onContainerSizeChanged = onContainerSizeChanged,
     ) {
         EmulationSurface(
             holderCallback = viewModel.mainHolderCallback,
@@ -933,16 +1594,20 @@ private fun EmulationSurfaces(
             touchIsTv = isMainTargetingTV,
             touchSurfaceWidth = mainTargetDimensions.width,
             touchSurfaceHeight = mainTargetDimensions.height,
+            isEnabled = !isScreenLayoutEditMode,
+            viewTransform = screenViewTransform(0),
             afterInit = { viewModel.initializeEmulation() },
         )
 
-        if (isPadVisibleEffective && !usePadPresentation) {
+        if (isPadShownInContainer) {
             EmulationSurface(
                 holderCallback = viewModel.padHolderCallback,
                 touchListener = padTouchListener,
                 touchIsTv = isPadTargetingTV,
                 touchSurfaceWidth = padTargetDimensions.width,
                 touchSurfaceHeight = padTargetDimensions.height,
+                isEnabled = !isScreenLayoutEditMode,
+                viewTransform = screenViewTransform(1),
             )
         }
     }
@@ -958,11 +1623,15 @@ private fun ScreensLayoutContainer(
     gapPercent: Int,
     yOffsetPercent: Int,
     targetAspectRatio: Float,
+    customRects: List<ScreenRect>? = null,
+    onContainerSizeChanged: (IntSize) -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     Layout(
         content = content,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged(onContainerSizeChanged),
     ) { measurables, constraints ->
         val containerWidth = constraints.maxWidth
         val containerHeight = constraints.maxHeight
@@ -970,64 +1639,187 @@ private fun ScreensLayoutContainer(
         if (count == 0) {
             return@Layout layout(containerWidth, containerHeight) {}
         }
-        val gap = if (count > 1) {
-            (min(containerWidth, containerHeight) * gapPercent / 100f).roundToInt()
-        } else {
-            0
-        }
 
-        // Vertical shift of the whole arrangement, as a percentage of the container height.
-        // Positive moves the screens down. Only used in portrait, where the screens are stacked.
-        val yOffset = (containerHeight * yOffsetPercent / 100f).roundToInt()
-
-        // Each screen keeps its aspect ratio. In portrait (vertical) a full width screen may be
-        // too tall, so its height is capped; in landscape (side by side) the width is capped.
-        val sizes = if (isVertical) {
-            val share = (containerHeight - gap * (count - 1)) / count
-            val boxWidth = min(containerWidth, (share * targetAspectRatio).roundToInt())
-            val boxHeight = (boxWidth / targetAspectRatio).roundToInt()
-            List(count) { boxWidth to boxHeight }
+        // A numeric layout puts the screens exactly where the user placed them, the automatic one
+        // arranges them from the layout, gap and offset settings.
+        val boxes = if (customRects != null) {
+            List(count) { index ->
+                val rect = customRects.getOrNull(index) ?: ScreenRect()
+                screenRectToBox(rect, containerWidth, containerHeight)
+            }
         } else {
-            val share = (containerWidth - gap * (count - 1)) / count
-            val boxHeight = min(containerHeight, (share / targetAspectRatio).roundToInt())
-            val boxWidth = (boxHeight * targetAspectRatio).roundToInt()
-            List(count) { boxWidth to boxHeight }
+            automaticScreenBoxes(
+                containerWidth = containerWidth,
+                containerHeight = containerHeight,
+                count = count,
+                isVertical = isVertical,
+                gapPercent = gapPercent,
+                yOffsetPercent = yOffsetPercent,
+                targetAspectRatio = targetAspectRatio,
+            )
         }
 
         val placeables = measurables.mapIndexed { index, measurable ->
-            val (width, height) = sizes[index]
-            measurable.measure(Constraints.fixed(width, height))
+            measurable.measure(Constraints.fixed(boxes[index].width, boxes[index].height))
         }
 
         layout(containerWidth, containerHeight) {
-            if (isVertical) {
-                // Stacked from the top (plus the user's offset) so a lone screen is not floating
-                // in the middle.
-                var y = yOffset
-                placeables.forEach { placeable ->
-                    placeable.place(
-                        IntOffset(
-                            x = (containerWidth - placeable.width) / 2,
-                            y = y,
-                        )
-                    )
-                    y += placeable.height + gap
-                }
-            } else {
-                val totalWidth = placeables.sumOf { it.width } + gap * (count - 1)
-                var x = (containerWidth - totalWidth) / 2
-                placeables.forEach { placeable ->
-                    placeable.place(
-                        IntOffset(
-                            x = x,
-                            y = (containerHeight - placeable.height) / 2 + yOffset,
-                        )
-                    )
-                    x += placeable.width + gap
-                }
+            placeables.forEachIndexed { index, placeable ->
+                placeable.place(IntOffset(boxes[index].x, boxes[index].y))
             }
         }
     }
+}
+
+private data class ScreenBox(val x: Int, val y: Int, val width: Int, val height: Int)
+
+// The automatic arrangement. Each screen keeps its aspect ratio: in portrait (vertical) a full
+// width screen may be too tall, so its height is capped; in landscape (side by side) the width is
+// capped.
+private fun automaticScreenBoxes(
+    containerWidth: Int,
+    containerHeight: Int,
+    count: Int,
+    isVertical: Boolean,
+    gapPercent: Int,
+    yOffsetPercent: Int,
+    targetAspectRatio: Float,
+): List<ScreenBox> {
+    val gap = if (count > 1) {
+        (min(containerWidth, containerHeight) * gapPercent / 100f).roundToInt()
+    } else {
+        0
+    }
+
+    // Vertical shift of the whole arrangement, as a percentage of the container height. Positive
+    // moves the screens down. Only used in portrait, where the screens are stacked.
+    val yOffset = (containerHeight * yOffsetPercent / 100f).roundToInt()
+
+    val sizes = if (isVertical) {
+        val share = (containerHeight - gap * (count - 1)) / count
+        val boxWidth = min(containerWidth, (share * targetAspectRatio).roundToInt())
+        val boxHeight = (boxWidth / targetAspectRatio).roundToInt()
+        List(count) { boxWidth to boxHeight }
+    } else {
+        val share = (containerWidth - gap * (count - 1)) / count
+        val boxHeight = min(containerHeight, (share / targetAspectRatio).roundToInt())
+        val boxWidth = (boxHeight * targetAspectRatio).roundToInt()
+        List(count) { boxWidth to boxHeight }
+    }
+
+    return if (isVertical) {
+        // Stacked from the top (plus the user's offset) so a lone screen is not floating in the
+        // middle.
+        var y = yOffset
+        sizes.map { (width, height) ->
+            ScreenBox(x = (containerWidth - width) / 2, y = y, width = width, height = height)
+                .also { y += height + gap }
+        }
+    } else {
+        val totalWidth = sizes.sumOf { it.first } + gap * (count - 1)
+        var x = (containerWidth - totalWidth) / 2
+        sizes.map { (width, height) ->
+            ScreenBox(
+                x = x,
+                y = (containerHeight - height) / 2 + yOffset,
+                width = width,
+                height = height,
+            ).also { x += width + gap }
+        }
+    }
+}
+
+// Rects of the screens that are actually drawn in the emulation area, in the order they are added
+// to ScreensLayoutContainer: the main surface (TV unless the screens are swapped) first, then the
+// GamePad surface when it is shown next to it.
+private fun CustomScreensLayout.visibleScreenRects(
+    isMainTv: Boolean,
+    isPadTv: Boolean,
+    isPadShown: Boolean,
+): List<ScreenRect> = buildList {
+    add(if (isMainTv) tv else pad)
+    if (isPadShown) {
+        add(if (isPadTv) tv else pad)
+    }
+}
+
+// Live transform of a SurfaceView while a screen is dragged in the layout editor. The view keeps
+// its laid out size and is only scaled/translated around its center.
+private data class ScreenViewTransform(
+    val scaleX: Float,
+    val scaleY: Float,
+    val translationX: Float,
+    val translationY: Float,
+)
+
+// Converts a stored percentage rect to pixels and keeps it inside of the container, so a screen is
+// never measured to nothing or drawn outside of the emulation area.
+private fun screenRectToBox(
+    rect: ScreenRect,
+    containerWidth: Int,
+    containerHeight: Int,
+): ScreenBox {
+    val containerWidthLong = containerWidth.toLong()
+    val containerHeightLong = containerHeight.toLong()
+    val x = (containerWidthLong * rect.x / SCREEN_RECT_MAX).toInt()
+        .coerceIn(0, containerWidth - 1)
+    val y = (containerHeightLong * rect.y / SCREEN_RECT_MAX).toInt()
+        .coerceIn(0, containerHeight - 1)
+
+    return ScreenBox(
+        x = x,
+        y = y,
+        width = (containerWidthLong * rect.width / SCREEN_RECT_MAX).toInt()
+            .coerceIn(1, containerWidth - x),
+        height = (containerHeightLong * rect.height / SCREEN_RECT_MAX).toInt()
+            .coerceIn(1, containerHeight - y),
+    )
+}
+
+// Builds the numeric layout that matches the current automatic arrangement, so enabling the
+// numeric layout does not move the screens until the user changes a value.
+private fun automaticCustomScreensLayout(
+    containerSize: IntSize,
+    layout: ScreensLayout,
+    gap: Int,
+    yOffsetPercent: Int,
+    targetAspectRatio: Float,
+    isMainTv: Boolean,
+    isPadTv: Boolean,
+    hasPad: Boolean,
+): CustomScreensLayout {
+    if (containerSize.width <= 0 || containerSize.height <= 0) {
+        return CustomScreensLayout()
+    }
+
+    val boxes = automaticScreenBoxes(
+        containerWidth = containerSize.width,
+        containerHeight = containerSize.height,
+        count = if (hasPad) 2 else 1,
+        isVertical = layout.isVertical(),
+        gapPercent = gap,
+        yOffsetPercent = yOffsetPercent,
+        targetAspectRatio = targetAspectRatio,
+    )
+
+    fun boxToRect(box: ScreenBox) = ScreenRect(
+        x = (box.x.toLong() * SCREEN_RECT_MAX / containerSize.width).toInt()
+            .coerceIn(0, SCREEN_RECT_MAX),
+        y = (box.y.toLong() * SCREEN_RECT_MAX / containerSize.height).toInt()
+            .coerceIn(0, SCREEN_RECT_MAX),
+        width = (box.width.toLong() * SCREEN_RECT_MAX / containerSize.width).toInt()
+            .coerceIn(SCREEN_RECT_MIN_SIZE, SCREEN_RECT_MAX),
+        height = (box.height.toLong() * SCREEN_RECT_MAX / containerSize.height).toInt()
+            .coerceIn(SCREEN_RECT_MIN_SIZE, SCREEN_RECT_MAX),
+    )
+
+    val mainRect = boxToRect(boxes[0])
+    val padRect = if (hasPad) boxToRect(boxes[1]) else mainRect
+
+    return CustomScreensLayout(
+        tv = if (isMainTv) mainRect else padRect,
+        pad = if (isPadTv) mainRect else padRect,
+    )
 }
 
 @Composable
@@ -1039,8 +1831,15 @@ private fun EmulationSurface(
     touchSurfaceWidth: Int,
     touchSurfaceHeight: Int,
     rotateLeft: Boolean = false,
+    isEnabled: Boolean = true,
+    viewTransform: ScreenViewTransform? = null,
     afterInit: () -> Unit = {}
 ) {
+    // While the layout editor is open the surface must not turn the drags into game touches.
+    SideEffect {
+        touchListener.isEnabled = isEnabled
+    }
+
     // The size (and aspect ratio) is decided by ScreensLayoutContainer.
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -1068,13 +1867,21 @@ private fun EmulationSurface(
                 })
             }
         },
-        update = {
+        update = { view ->
             touchListener.updateConfiguration(
                 isTv = touchIsTv,
                 surfaceWidth = touchSurfaceWidth,
                 surfaceHeight = touchSurfaceHeight,
                 rotateLeft = rotateLeft,
             )
+
+            // SurfaceViews ignore Compose canvas transforms, so the drag preview is applied to the
+            // View itself. The default pivot is the center of the view, which matches the
+            // center based boxes computed for the preview.
+            view.scaleX = viewTransform?.scaleX ?: 1f
+            view.scaleY = viewTransform?.scaleY ?: 1f
+            view.translationX = viewTransform?.translationX ?: 0f
+            view.translationY = viewTransform?.translationY ?: 0f
         },
     )
 }

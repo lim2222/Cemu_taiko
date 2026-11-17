@@ -7,6 +7,10 @@ import info.cemu.cemu.nativeinterface.NativeInput
 import kotlin.math.roundToInt
 
 class CanvasOnTouchListener : View.OnTouchListener {
+    // Disabled while the screens are being moved/resized, so the drag reaches the Compose editor
+    // instead of being turned into emulated touches.
+    var isEnabled: Boolean = true
+
     private var currentPointerId: Int = -1
     private var isTV: Boolean = false
     private var rotateLeft: Boolean = false
@@ -28,6 +32,11 @@ class CanvasOnTouchListener : View.OnTouchListener {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouch(v: View, event: MotionEvent): Boolean {
+        if (!isEnabled) {
+            currentPointerId = -1
+            return false
+        }
+
         val pointerIndex = when (event.actionMasked) {
             MotionEvent.ACTION_MOVE -> {
                 if (currentPointerId == -1) {

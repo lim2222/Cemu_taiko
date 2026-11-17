@@ -33,6 +33,11 @@ data class EmulationSettings(
     // landscape.
     val isPadVisiblePortrait: Boolean = false,
     val isPadVisibleLandscape: Boolean = false,
+    // Numeric screen layouts edited in the side menu. A null value means the screens are arranged
+    // automatically by the layout / gap / offset settings above. Both orientations keep their own
+    // values, like the rest of the display settings.
+    val customScreensLayoutPortrait: CustomScreensLayout? = null,
+    val customScreensLayoutLandscape: CustomScreensLayout? = null,
     val isPadOnExternalDisplay: Boolean = false,
     val isExternalScreenRotatedLeft: Boolean = false,
     // Fast forward multiplier and slow motion divisor picked in the side menu. The on/off state
@@ -64,6 +69,9 @@ data class PerGameDisplaySettings(
     val isPadVisibleLandscape: Boolean? = null,
     // Per-game override for the portrait screens vertical offset.
     val screensYOffsetPortrait: Int? = null,
+    // Per-game override for the numeric screen layout, one value per orientation.
+    val customScreensLayoutPortrait: CustomScreensLayout? = null,
+    val customScreensLayoutLandscape: CustomScreensLayout? = null,
 )
 
 @Serializable
