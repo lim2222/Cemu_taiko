@@ -35,7 +35,7 @@ val versionMinor: Int? = System.getenv("EMULATOR_VERSION_MINOR")?.toIntOrNull()
 fun getVersionName(): String {
     if (versionMajor != null && versionMinor != null)
         return "$versionMajor.$versionMinor"
-    return "0.5.2+Taiko.1.0"
+    return "0.5.2+Taiko.1.1"
 }
 
 val cemuDataFilesFolder = "../../../bin"
