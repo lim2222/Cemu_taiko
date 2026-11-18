@@ -7,6 +7,7 @@ import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.view.Display
 import android.view.MotionEvent
+import android.view.SurfaceControl
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -44,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.Slider as MaterialSlider
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -476,85 +478,99 @@ fun EmulationScreen(
             }
         },
     ) {
-        if (hasSurfacesBeenCreated) {
-            EmulationSurfaces(
-                viewModel = viewModel,
-                screensLayout = screensLayout,
-                screensGap = screensGap,
-                screensYOffsetPercent = if (isPortrait) screensYOffsetPortrait else 0,
-                isPadShownInContainer = isPadShownInContainer,
-                usePadPresentation = usePadPresentation,
-                padDisplay = padDisplay,
-                targetAspectRatio = targetAspectRatio,
-                customScreensLayout = customScreensLayout,
-                screenLayoutPreview = screenLayoutPreview,
-                containerSize = emulationAreaSize,
-                isScreenLayoutEditMode = isScreenLayoutEditMode,
-                onContainerSizeChanged = { emulationAreaSize = it },
-            )
-        }
+        // The SurfaceViews stay behind this window, so the editor toolbar, input buttons and side
+        // menu are never covered by a rendering surface. Opacity is applied to each surface's
+        // SurfaceControl, which lets SurfaceFlinger blend the screens without raising their Z.
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            if (hasSurfacesBeenCreated) {
+                EmulationSurfaces(
+                    viewModel = viewModel,
+                    screensLayout = screensLayout,
+                    screensGap = screensGap,
+                    screensYOffsetPercent = if (isPortrait) screensYOffsetPortrait else 0,
+                    isPadShownInContainer = isPadShownInContainer,
+                    usePadPresentation = usePadPresentation,
+                    padDisplay = padDisplay,
+                    targetAspectRatio = targetAspectRatio,
+                    customScreensLayout = customScreensLayout,
+                    screenLayoutPreview = screenLayoutPreview,
+                    containerSize = emulationAreaSize,
+                    isScreenLayoutEditMode = isScreenLayoutEditMode,
+                    onContainerSizeChanged = { emulationAreaSize = it },
+                )
+            }
 
-        InputOverlaySurface(
-            isVisible = isInputOverlayVisible && !isScreenLayoutEditMode,
-            inputOverlaySettings = inputOverlaySettings,
-            controllerType = inputOverlayControllerType,
-            inputMode = inputOverlayInputMode,
-            onEditFinished = {
-                viewModel.saveInputOverlayRectangles(inputOverlayControllerType, isPortrait, it)
-            },
-            onMenuRequested = {
-                scope.launch { toggleMenu() }
-            },
-        )
-
-        if (isScreenLayoutEditMode && customScreensLayout != null) {
-            ScreenLayoutEditor(
-                containerSize = emulationAreaSize,
-                layout = screenLayoutPreview ?: customScreensLayout,
-                areScreensSwapped = sideMenuState.areScreensSwapped,
-                isPadShown = isPadShownInContainer,
-                editMode = screenEditMode,
-                selectedScreenIsTv = selectedScreenIsTv,
-                onSelectScreen = { selectedScreenIsTv = it },
-                onModeChanged = { screenEditMode = it },
-                onLayoutChanged = { screenLayoutPreview = it },
-                onDragFinished = {
-                    screenLayoutPreview?.let { viewModel.setCustomScreensLayout(isPortrait, it) }
-                },
-                onReset = {
-                    val layout = automaticCustomScreensLayout(
-                        containerSize = emulationAreaSize,
-                        layout = screensLayout,
-                        gap = screensGap,
-                        yOffsetPercent = if (isPortrait) screensYOffsetPortrait else 0,
-                        targetAspectRatio = targetAspectRatio,
-                        isMainTv = !sideMenuState.areScreensSwapped,
-                        isPadTv = sideMenuState.areScreensSwapped,
-                        hasPad = isPadShownInContainer,
-                    )
-                    screenLayoutPreview = layout
-                    viewModel.setCustomScreensLayout(isPortrait, layout)
-                },
-                onDone = { stopScreenLayoutEditing() },
-            )
-        }
-
-        if (inputOverlayInputMode != DEFAULT) {
-            EditInputsLayout(
+            InputOverlaySurface(
+                isVisible = isInputOverlayVisible && !isScreenLayoutEditMode,
+                inputOverlaySettings = inputOverlaySettings,
+                controllerType = inputOverlayControllerType,
                 inputMode = inputOverlayInputMode,
-                onFinishClick = {
-                    snackbarHostState.showMessage(scope, tr("Exited input edit mode"))
-                    inputOverlayInputMode = DEFAULT
+                onEditFinished = {
+                    viewModel.saveInputOverlayRectangles(inputOverlayControllerType, isPortrait, it)
                 },
-                onMoveClick = {
-                    snackbarHostState.showMessage(scope, tr("Edit input positions"))
-                    inputOverlayInputMode = EDIT_POSITION
-                },
-                onResizeClick = {
-                    snackbarHostState.showMessage(scope, tr("Edit input size"))
-                    inputOverlayInputMode = EDIT_SIZE
+                onMenuRequested = {
+                    scope.launch { toggleMenu() }
                 },
             )
+
+            if (isScreenLayoutEditMode && customScreensLayout != null) {
+                ScreenLayoutEditor(
+                    containerSize = emulationAreaSize,
+                    layout = screenLayoutPreview ?: customScreensLayout,
+                    areScreensSwapped = sideMenuState.areScreensSwapped,
+                    isPadShown = isPadShownInContainer,
+                    editMode = screenEditMode,
+                    selectedScreenIsTv = selectedScreenIsTv,
+                    onSelectScreen = { selectedScreenIsTv = it },
+                    onModeChanged = { screenEditMode = it },
+                    onLayoutChanged = { screenLayoutPreview = it },
+                    onOpacityChanged = { opacity ->
+                        val current = screenLayoutPreview ?: customScreensLayout
+                        val updated = if (selectedScreenIsTv) {
+                            current.copy(tv = current.tv.copy(opacity = opacity))
+                        } else {
+                            current.copy(pad = current.pad.copy(opacity = opacity))
+                        }
+                        screenLayoutPreview = updated
+                    },
+                    onDragFinished = {
+                        screenLayoutPreview?.let { viewModel.setCustomScreensLayout(isPortrait, it) }
+                    },
+                    onReset = {
+                        val layout = automaticCustomScreensLayout(
+                            containerSize = emulationAreaSize,
+                            layout = screensLayout,
+                            gap = screensGap,
+                            yOffsetPercent = if (isPortrait) screensYOffsetPortrait else 0,
+                            targetAspectRatio = targetAspectRatio,
+                            isMainTv = !sideMenuState.areScreensSwapped,
+                            isPadTv = sideMenuState.areScreensSwapped,
+                            hasPad = isPadShownInContainer,
+                        )
+                        screenLayoutPreview = layout
+                        viewModel.setCustomScreensLayout(isPortrait, layout)
+                    },
+                    onDone = { stopScreenLayoutEditing() },
+                )
+            }
+
+            if (inputOverlayInputMode != DEFAULT) {
+                EditInputsLayout(
+                    inputMode = inputOverlayInputMode,
+                    onFinishClick = {
+                        snackbarHostState.showMessage(scope, tr("Exited input edit mode"))
+                        inputOverlayInputMode = DEFAULT
+                    },
+                    onMoveClick = {
+                        snackbarHostState.showMessage(scope, tr("Edit input positions"))
+                        inputOverlayInputMode = EDIT_POSITION
+                    },
+                    onResizeClick = {
+                        snackbarHostState.showMessage(scope, tr("Edit input size"))
+                        inputOverlayInputMode = EDIT_SIZE
+                    },
+                )
+            }
         }
     }
 
@@ -1185,7 +1201,7 @@ private fun ScreenRect.resizedByPixels(
     newHeight = newHeight.coerceIn(SCREEN_RECT_MIN_SIZE, SCREEN_RECT_MAX)
     newY = newY.coerceIn(0, SCREEN_RECT_MAX - newHeight)
 
-    return ScreenRect(x = newX, y = newY, width = newWidth, height = newHeight)
+    return copy(x = newX, y = newY, width = newWidth, height = newHeight)
 }
 
 private fun screenIsTv(index: Int, areScreensSwapped: Boolean): Boolean =
@@ -1312,6 +1328,7 @@ private fun ScreenLayoutEditor(
     onSelectScreen: (Boolean) -> Unit,
     onModeChanged: (ScreenLayoutEditMode) -> Unit,
     onLayoutChanged: (CustomScreensLayout) -> Unit,
+    onOpacityChanged: (Int) -> Unit,
     onDragFinished: () -> Unit,
     onReset: () -> Unit,
     onDone: () -> Unit,
@@ -1388,6 +1405,8 @@ private fun ScreenLayoutEditor(
             },
         )
 
+        val selectedRect = if (selectedScreenIsTv) layout.tv else layout.pad
+
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -1414,7 +1433,7 @@ private fun ScreenLayoutEditor(
 
                     TextButton(onClick = { onModeChanged(ScreenLayoutEditMode.MOVE) }) {
                         Text(
-                            text = tr("Move screen"),
+                            text = tr("Move"),
                             fontSize = 14.sp,
                             color = if (editMode == ScreenLayoutEditMode.MOVE) primaryColor
                             else Color.White,
@@ -1423,7 +1442,7 @@ private fun ScreenLayoutEditor(
 
                     TextButton(onClick = { onModeChanged(ScreenLayoutEditMode.RESIZE) }) {
                         Text(
-                            text = tr("Screen size"),
+                            text = tr("Size"),
                             fontSize = 14.sp,
                             color = if (editMode == ScreenLayoutEditMode.RESIZE) primaryColor
                             else Color.White,
@@ -1439,7 +1458,28 @@ private fun ScreenLayoutEditor(
                     }
                 }
 
-                val selectedRect = if (selectedScreenIsTv) layout.tv else layout.pad
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = tr("Opacity"),
+                        fontSize = 12.sp,
+                        color = Color.White,
+                    )
+                    MaterialSlider(
+                        value = selectedRect.opacity / SCREEN_RECT_MAX.toFloat(),
+                        valueRange = 0f..1f,
+                        onValueChange = {
+                            onOpacityChanged((it * SCREEN_RECT_MAX).roundToInt())
+                        },
+                        onValueChangeFinished = onDragFinished,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = percentToString(selectedRect.opacity) + "%",
+                        fontSize = 12.sp,
+                        color = Color.White,
+                    )
+                }
+
                 Text(
                     text = tr(if (selectedScreenIsTv) "TV" else "GamePad") +
                         ":  X " + percentToString(selectedRect.x) +
@@ -1550,6 +1590,11 @@ private fun EmulationSurfaces(
         isPadTv = isPadTargetingTV,
         isPadShown = isPadShownInContainer,
     )
+    val displayedRects = previewRects ?: storedRects
+    val mainScreenRect = displayedRects?.getOrNull(0)
+    val padScreenRect = displayedRects?.getOrNull(1)
+    val mainOpacity = (mainScreenRect?.opacity ?: SCREEN_RECT_MAX) / SCREEN_RECT_MAX.toFloat()
+    val padOpacity = (padScreenRect?.opacity ?: SCREEN_RECT_MAX) / SCREEN_RECT_MAX.toFloat()
 
     // While a screen is dragged only a View transform is applied: the SurfaceView keeps its size
     // (so the native surface is not resized on every frame) and is just scaled/translated. The
@@ -1596,6 +1641,7 @@ private fun EmulationSurfaces(
             touchSurfaceHeight = mainTargetDimensions.height,
             isEnabled = !isScreenLayoutEditMode,
             viewTransform = screenViewTransform(0),
+            opacity = mainOpacity,
             afterInit = { viewModel.initializeEmulation() },
         )
 
@@ -1608,6 +1654,7 @@ private fun EmulationSurfaces(
                 touchSurfaceHeight = padTargetDimensions.height,
                 isEnabled = !isScreenLayoutEditMode,
                 viewTransform = screenViewTransform(1),
+                opacity = padOpacity,
             )
         }
     }
@@ -1822,6 +1869,19 @@ private fun automaticCustomScreensLayout(
     )
 }
 
+// View.setAlpha() is ignored for a SurfaceView behind its parent window. Setting the alpha on the
+// SurfaceControl itself makes SurfaceFlinger blend the surface without changing its Z order, so the
+// app UI stays above it.
+private fun SurfaceView.applySurfaceControlAlpha(opacity: Float) {
+    val control = surfaceControl ?: return
+    runCatching {
+        SurfaceControl.Transaction().use { transaction ->
+            transaction.setAlpha(control, opacity.coerceIn(0f, 1f))
+            transaction.apply()
+        }
+    }
+}
+
 @Composable
 @SuppressLint("ClickableViewAccessibility")
 private fun EmulationSurface(
@@ -1833,12 +1893,17 @@ private fun EmulationSurface(
     rotateLeft: Boolean = false,
     isEnabled: Boolean = true,
     viewTransform: ScreenViewTransform? = null,
+    opacity: Float = 1f,
     afterInit: () -> Unit = {}
 ) {
     // While the layout editor is open the surface must not turn the drags into game touches.
     SideEffect {
         touchListener.isEnabled = isEnabled
     }
+
+    // The surface callbacks can run after a recomposition, so they must not keep the opacity value
+    // that was current when the View was first created.
+    val currentOpacity = rememberUpdatedState(opacity)
 
     // The size (and aspect ratio) is decided by ScreensLayoutContainer.
     AndroidView(
@@ -1847,6 +1912,9 @@ private fun EmulationSurface(
             SurfaceView(context).apply {
                 var firstChange = true
 
+                fun applyCurrentOpacity() = applySurfaceControlAlpha(currentOpacity.value)
+
+                applyCurrentOpacity()
                 setOnTouchListener(touchListener)
 
                 holder.addCallback(holderCallback)
@@ -1855,13 +1923,16 @@ private fun EmulationSurface(
                     override fun surfaceChanged(
                         holder: SurfaceHolder, format: Int, width: Int, height: Int
                     ) {
+                        applyCurrentOpacity()
                         if (firstChange) {
                             afterInit()
                             firstChange = false
                         }
                     }
 
-                    override fun surfaceCreated(holder: SurfaceHolder) {}
+                    override fun surfaceCreated(holder: SurfaceHolder) {
+                        applyCurrentOpacity()
+                    }
 
                     override fun surfaceDestroyed(holder: SurfaceHolder) {}
                 })
@@ -1882,6 +1953,7 @@ private fun EmulationSurface(
             view.scaleY = viewTransform?.scaleY ?: 1f
             view.translationX = viewTransform?.translationX ?: 0f
             view.translationY = viewTransform?.translationY ?: 0f
+            view.applySurfaceControlAlpha(opacity)
         },
     )
 }

@@ -134,6 +134,9 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     private var thudPrimitiveSupported: Boolean? = null
 		
     init {
+        // Stay behind the parent window, but above the emulation SurfaceViews. This keeps the
+        // buttons visible even when a rendering screen is translucent.
+        setZOrderMediaOverlay(true)
         visibility = GONE
 
         pixelDensity = context.resources.displayMetrics.densityDpi
