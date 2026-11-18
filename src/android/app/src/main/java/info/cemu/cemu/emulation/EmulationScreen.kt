@@ -5,6 +5,10 @@ import android.app.Activity
 import android.content.Context
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Rect
+import android.net.Uri
 import android.view.Display
 import android.view.MotionEvent
 import android.view.SurfaceControl
@@ -12,6 +16,8 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -99,6 +105,7 @@ import info.cemu.cemu.common.settings.MAX_SCREENS_Y_OFFSET
 import info.cemu.cemu.common.settings.MIN_SCREENS_Y_OFFSET
 import info.cemu.cemu.common.settings.SCREEN_RECT_MAX
 import info.cemu.cemu.common.settings.SCREEN_RECT_MIN_SIZE
+import info.cemu.cemu.common.settings.ScreenBackground
 import info.cemu.cemu.common.settings.ScreenOrientationMode
 import info.cemu.cemu.common.settings.ScreenRect
 import info.cemu.cemu.common.settings.ScreensLayout
@@ -125,7 +132,9 @@ import info.cemu.cemu.nativeinterface.NativeSettings
 import java.util.Locale
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun EmulationScreen(
@@ -160,6 +169,10 @@ fun EmulationScreen(
     // Live layout while a screen is dragged. It is only written to the settings once the finger is
     // lifted, so dragging does not resize the surfaces or hit the data store on every frame.
     var screenLayoutPreview by remember { mutableStateOf<CustomScreensLayout?>(null) }
+    // Wallpaper state. The bitmap is decoded outside of the DataStore flow so choosing or moving it
+    // does not depend on a slow image read. The transform is committed on drag end like the layout.
+    var backgroundPreview by remember { mutableStateOf<ScreenBackground?>(null) }
+    var backgroundBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     val emulationError by viewModel.emulationError.collectAsState()
     val isEmulationInitialized by viewModel.isEmulationInitialized.collectAsState()
@@ -228,6 +241,15 @@ fun EmulationScreen(
             ?: globalDisplaySettings.customScreensLayoutLandscape
     }
 
+    // Wallpaper is also per game and per orientation, with the global setting as a fallback.
+    val storedBackground = if (isPortrait) {
+        perGameDisplaySettings?.backgroundPortrait ?: globalDisplaySettings.backgroundPortrait
+    } else {
+        perGameDisplaySettings?.backgroundLandscape ?: globalDisplaySettings.backgroundLandscape
+    }
+    val background = backgroundPreview ?: storedBackground
+    val hasBackground = !background.isEmpty()
+
     // Whether the GamePad screen is shown. It is stored per game and per orientation, like the
     // TV/GamePad layout, because a screen that is hidden in portrait (where both would not fit)
     // can still be shown in landscape, and games can differ.
@@ -258,7 +280,52 @@ fun EmulationScreen(
     // The game is stretched into a 4:3 area in portrait and a 16:9 area in landscape.
     val targetAspectRatio = if (isPortrait) 4f / 3f else 16f / 9f
 
-    val activity = LocalContext.current as? Activity
+    val context = LocalContext.current
+    val activity = context as? Activity
+
+    val backgroundPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) {
+            return@rememberLauncherForActivityResult
+        }
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        } catch (_: SecurityException) {
+        }
+        val chosen = ScreenBackground(uri = uri.toString())
+        backgroundPreview = chosen
+        viewModel.setBackground(isPortrait, chosen)
+    }
+
+    LaunchedEffect(background.uri, context) {
+        val uriString = background.uri
+        backgroundBitmap = if (uriString.isNullOrEmpty()) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                try {
+                    EmulationBackgroundLoader.decode(context, Uri.parse(uriString))
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(backgroundPreview, storedBackground) {
+        if (backgroundPreview != null && backgroundPreview == storedBackground) {
+            backgroundPreview = null
+        }
+    }
+
+    LaunchedEffect(isPortrait) {
+        backgroundPreview = null
+    }
+
     LaunchedEffect(activity, screenOrientationMode, isDisplaySettingsLoaded) {
         // Nothing is applied until the stored settings are known: the first composition still sees
         // the default (landscape) and rotating the window there and back again on every launch is
@@ -276,6 +343,46 @@ fun EmulationScreen(
     val usePadPresentation =
         isPadVisibleEffective && sideMenuState.isPadOnExternalDisplay && padDisplay != null
     val isPadShownInContainer = isPadVisibleEffective && !usePadPresentation
+
+    // The wallpaper needs the same boxes the surfaces are laid out in. During a layout drag the
+    // preview boxes are used so the hole follows the screen under the finger.
+    val screenHoles = remember(
+        emulationAreaSize,
+        screenLayoutPreview,
+        customScreensLayout,
+        sideMenuState.areScreensSwapped,
+        isPadShownInContainer,
+        screensLayout,
+        screensGap,
+        screensYOffsetPortrait,
+        isPortrait,
+        targetAspectRatio,
+    ) {
+        if (emulationAreaSize.width <= 0 || emulationAreaSize.height <= 0) {
+            emptyList()
+        } else {
+            val boxes = if (screenLayoutPreview != null || customScreensLayout != null) {
+                (screenLayoutPreview ?: customScreensLayout)!!.visibleScreenRects(
+                    isMainTv = !sideMenuState.areScreensSwapped,
+                    isPadTv = sideMenuState.areScreensSwapped,
+                    isPadShown = isPadShownInContainer,
+                ).map { screenRectToBox(it, emulationAreaSize.width, emulationAreaSize.height) }
+            } else {
+                automaticScreenBoxes(
+                    containerWidth = emulationAreaSize.width,
+                    containerHeight = emulationAreaSize.height,
+                    count = if (isPadShownInContainer) 2 else 1,
+                    isVertical = screensLayout.isVertical(),
+                    gapPercent = screensGap,
+                    yOffsetPercent = if (isPortrait) screensYOffsetPortrait else 0,
+                    targetAspectRatio = targetAspectRatio,
+                )
+            }
+            boxes.map { box ->
+                Rect(box.x, box.y, box.x + box.width, box.y + box.height)
+            }
+        }
+    }
 
     // The surface is 4:3 in portrait and 16:9 in landscape. In landscape that already matches
     // most titles, so the user's fullscreen scaling setting is kept; in portrait the game has to
@@ -309,10 +416,22 @@ fun EmulationScreen(
         }
     }
 
+    fun commitBackgroundPreview() {
+        backgroundPreview?.let { viewModel.setBackground(isPortrait, it) }
+    }
+
     // Leaving the editor accepts nothing new; the last committed layout stays.
     fun stopScreenLayoutEditing() {
         isScreenLayoutEditMode = false
         screenLayoutPreview = null
+        // A drag normally commits on finger up; this also covers leaving mid-drag via the button.
+        commitBackgroundPreview()
+    }
+
+    fun removeBackground() {
+        val cleared = ScreenBackground()
+        backgroundPreview = cleared
+        viewModel.setBackground(isPortrait, cleared)
     }
 
     // Opens the gesture editor. A game that still uses the automatic arrangement first gets a
@@ -501,7 +620,12 @@ fun EmulationScreen(
             }
 
             InputOverlaySurface(
-                isVisible = isInputOverlayVisible && !isScreenLayoutEditMode,
+                // Keep this SurfaceView alive for the wallpaper even when the buttons are hidden.
+                isVisible = (isInputOverlayVisible && !isScreenLayoutEditMode) || hasBackground,
+                areButtonsVisible = isInputOverlayVisible && !isScreenLayoutEditMode,
+                backgroundBitmap = backgroundBitmap,
+                backgroundTransform = background,
+                backgroundHoles = screenHoles,
                 inputOverlaySettings = inputOverlaySettings,
                 controllerType = inputOverlayControllerType,
                 inputMode = inputOverlayInputMode,
@@ -521,9 +645,14 @@ fun EmulationScreen(
                     isPadShown = isPadShownInContainer,
                     editMode = screenEditMode,
                     selectedScreenIsTv = selectedScreenIsTv,
+                    background = background,
                     onSelectScreen = { selectedScreenIsTv = it },
                     onModeChanged = { screenEditMode = it },
                     onLayoutChanged = { screenLayoutPreview = it },
+                    onBackgroundChanged = { backgroundPreview = it },
+                    onBackgroundDragFinished = { commitBackgroundPreview() },
+                    onChooseBackground = { backgroundPicker.launch(arrayOf("image/*")) },
+                    onRemoveBackground = { removeBackground() },
                     onOpacityChanged = { opacity ->
                         val current = screenLayoutPreview ?: customScreensLayout
                         val updated = if (selectedScreenIsTv) {
@@ -1147,7 +1276,7 @@ private fun percentToString(permille: Int): String =
         String.format(Locale.US, "%.1f", permille / 10f)
     }
 
-private enum class ScreenLayoutEditMode { MOVE, RESIZE }
+private enum class ScreenLayoutEditMode { MOVE, RESIZE, BG_MOVE, BG_SIZE }
 
 // Moves a rect by a drag in pixels and keeps it fully inside of the emulation area.
 private fun ScreenRect.movedByPixels(
@@ -1204,6 +1333,28 @@ private fun ScreenRect.resizedByPixels(
     return copy(x = newX, y = newY, width = newWidth, height = newHeight)
 }
 
+// Wallpaper drags are in view pixels. The renderer clamps the offsets to what the current scale
+// actually allows, so these helpers only need to accumulate the user's input.
+private fun ScreenBackground.movedByPixels(dx: Float, dy: Float): ScreenBackground = copy(
+    translateX = translateX + dx,
+    translateY = translateY + dy,
+)
+
+private fun ScreenBackground.scaledByPixels(dx: Float, dy: Float): ScreenBackground {
+    val factorX = 1f + dx * 0.003f
+    val factorY = 1f + dy * 0.003f
+    return copy(
+        scaleX = (scaleX * factorX).coerceIn(
+            ScreenBackground.MIN_SCALE,
+            ScreenBackground.MAX_SCALE,
+        ),
+        scaleY = (scaleY * factorY).coerceIn(
+            ScreenBackground.MIN_SCALE,
+            ScreenBackground.MAX_SCALE,
+        ),
+    )
+}
+
 private fun screenIsTv(index: Int, areScreensSwapped: Boolean): Boolean =
     (index == 0) != areScreensSwapped
 
@@ -1217,9 +1368,12 @@ private class ScreenLayoutGestureListener(
     private val getContainerSize: () -> IntSize,
     private val areScreensSwapped: () -> Boolean,
     private val getMode: () -> ScreenLayoutEditMode,
+    private val getBackground: () -> ScreenBackground,
     private val onSelectScreen: (Boolean) -> Unit,
     private val onLayoutChanged: (CustomScreensLayout) -> Unit,
     private val onDragFinished: () -> Unit,
+    private val onBackgroundChanged: (ScreenBackground) -> Unit,
+    private val onBackgroundDragFinished: () -> Unit,
 ) : View.OnTouchListener {
     private var activePointerId = -1
     private var startX = 0f
@@ -1227,6 +1381,7 @@ private class ScreenLayoutGestureListener(
     private var startRect: ScreenRect? = null
     private var startIsTv = false
     private var startLayout: CustomScreensLayout? = null
+    private var startBackground: ScreenBackground? = null
 
     override fun onTouch(v: View, event: MotionEvent): Boolean {
         when (event.actionMasked) {
@@ -1238,6 +1393,17 @@ private class ScreenLayoutGestureListener(
                 val size = getContainerSize()
                 if (size.width <= 0 || size.height <= 0) {
                     return false
+                }
+
+                val mode = getMode()
+                if (mode == ScreenLayoutEditMode.BG_MOVE ||
+                    mode == ScreenLayoutEditMode.BG_SIZE
+                ) {
+                    activePointerId = event.getPointerId(0)
+                    startX = event.x
+                    startY = event.y
+                    startBackground = getBackground()
+                    return true
                 }
 
                 val rects = getRects()
@@ -1274,11 +1440,23 @@ private class ScreenLayoutGestureListener(
                     return true
                 }
 
-                val rect = startRect ?: return true
-                val layout = startLayout ?: return true
                 val size = getContainerSize()
                 val dx = event.getX(index) - startX
                 val dy = event.getY(index) - startY
+
+                val background = startBackground
+                if (background != null) {
+                    val updated = if (getMode() == ScreenLayoutEditMode.BG_MOVE) {
+                        background.movedByPixels(dx, dy)
+                    } else {
+                        background.scaledByPixels(dx, dy)
+                    }
+                    onBackgroundChanged(updated)
+                    return true
+                }
+
+                val rect = startRect ?: return true
+                val layout = startLayout ?: return true
 
                 val updated = if (getMode() == ScreenLayoutEditMode.MOVE) {
                     rect.movedByPixels(dx, dy, size.width, size.height)
@@ -1301,10 +1479,16 @@ private class ScreenLayoutGestureListener(
                     return true
                 }
 
+                val wasBackgroundDrag = startBackground != null
                 activePointerId = -1
                 startRect = null
                 startLayout = null
-                onDragFinished()
+                startBackground = null
+                if (wasBackgroundDrag) {
+                    onBackgroundDragFinished()
+                } else {
+                    onDragFinished()
+                }
                 return true
             }
         }
@@ -1325,9 +1509,14 @@ private fun ScreenLayoutEditor(
     isPadShown: Boolean,
     editMode: ScreenLayoutEditMode,
     selectedScreenIsTv: Boolean,
+    background: ScreenBackground,
     onSelectScreen: (Boolean) -> Unit,
     onModeChanged: (ScreenLayoutEditMode) -> Unit,
     onLayoutChanged: (CustomScreensLayout) -> Unit,
+    onBackgroundChanged: (ScreenBackground) -> Unit,
+    onBackgroundDragFinished: () -> Unit,
+    onChooseBackground: () -> Unit,
+    onRemoveBackground: () -> Unit,
     onOpacityChanged: (Int) -> Unit,
     onDragFinished: () -> Unit,
     onReset: () -> Unit,
@@ -1343,6 +1532,9 @@ private fun ScreenLayoutEditor(
     val currentOnSelectScreen by rememberUpdatedState(onSelectScreen)
     val currentOnLayoutChanged by rememberUpdatedState(onLayoutChanged)
     val currentOnDragFinished by rememberUpdatedState(onDragFinished)
+    val currentBackground by rememberUpdatedState(background)
+    val currentOnBackgroundChanged by rememberUpdatedState(onBackgroundChanged)
+    val currentOnBackgroundDragFinished by rememberUpdatedState(onBackgroundDragFinished)
 
     // Created once and kept across recompositions so a drag is not interrupted by the preview
     // updates it produces. All values are read through the updated states above.
@@ -1359,9 +1551,12 @@ private fun ScreenLayoutEditor(
             getContainerSize = { currentSize },
             areScreensSwapped = { currentSwapped },
             getMode = { currentEditMode },
+            getBackground = { currentBackground },
             onSelectScreen = { currentOnSelectScreen(it) },
             onLayoutChanged = { currentOnLayoutChanged(it) },
             onDragFinished = { currentOnDragFinished() },
+            onBackgroundChanged = { currentOnBackgroundChanged(it) },
+            onBackgroundDragFinished = { currentOnBackgroundDragFinished() },
         )
     }
 
@@ -1370,6 +1565,7 @@ private fun ScreenLayoutEditor(
     var barOffset by remember { mutableStateOf(Offset.Zero) }
 
     val hasSize = containerSize.width > 0 && containerSize.height > 0
+    val backgroundIsSet = !background.isEmpty()
     val boxes = if (hasSize) {
         layout.visibleScreenRects(
             isMainTv = !areScreensSwapped,
@@ -1459,6 +1655,47 @@ private fun ScreenLayoutEditor(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onChooseBackground) {
+                        Text(
+                            text = tr("BG"),
+                            fontSize = 14.sp,
+                            color = if (backgroundIsSet) primaryColor else Color.White,
+                        )
+                    }
+
+                    TextButton(
+                        onClick = { onModeChanged(ScreenLayoutEditMode.BG_MOVE) },
+                        enabled = backgroundIsSet,
+                    ) {
+                        Text(
+                            text = tr("BG Move"),
+                            fontSize = 14.sp,
+                            color = if (editMode == ScreenLayoutEditMode.BG_MOVE) primaryColor
+                            else Color.White,
+                        )
+                    }
+
+                    TextButton(
+                        onClick = { onModeChanged(ScreenLayoutEditMode.BG_SIZE) },
+                        enabled = backgroundIsSet,
+                    ) {
+                        Text(
+                            text = tr("BG Size"),
+                            fontSize = 14.sp,
+                            color = if (editMode == ScreenLayoutEditMode.BG_SIZE) primaryColor
+                            else Color.White,
+                        )
+                    }
+
+                    TextButton(
+                        onClick = onRemoveBackground,
+                        enabled = backgroundIsSet,
+                    ) {
+                        Text(text = tr("BG Off"), fontSize = 14.sp, color = Color.White)
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = tr("Opacity"),
                         fontSize = 12.sp,
@@ -1495,10 +1732,18 @@ private fun ScreenLayoutEditor(
 
         Text(
             text = tr(
-                if (editMode == ScreenLayoutEditMode.MOVE) {
-                    "Drag the TV or GamePad screen to move it"
-                } else {
-                    "Drag horizontally to change the width, vertically to change the height"
+                when (editMode) {
+                    ScreenLayoutEditMode.MOVE ->
+                        "Drag the TV or GamePad screen to move it"
+
+                    ScreenLayoutEditMode.RESIZE ->
+                        "Drag horizontally to change the width, vertically to change the height"
+
+                    ScreenLayoutEditMode.BG_MOVE ->
+                        "Drag anywhere to move the background"
+
+                    ScreenLayoutEditMode.BG_SIZE ->
+                        "Drag horizontally to change the width, vertically to change the height"
                 }
             ),
             fontSize = 12.sp,

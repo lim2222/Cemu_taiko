@@ -11,6 +11,27 @@ import kotlinx.serialization.json.Json
 import java.io.InputStream
 import java.io.OutputStream
 
+// Wallpaper drawn around the rendering surfaces. The transform is in view pixels: the image is
+// first fitted to cover the emulation area, then the user scale and offsets are applied on top.
+// X and Y scale are independent, so a horizontal drag only changes the width and a vertical drag
+// only changes the height.
+@Serializable
+data class ScreenBackground(
+    val uri: String? = null,
+    val translateX: Float = 0f,
+    val translateY: Float = 0f,
+    val scaleX: Float = DEFAULT_SCALE,
+    val scaleY: Float = DEFAULT_SCALE,
+) {
+    fun isEmpty(): Boolean = uri.isNullOrEmpty()
+
+    companion object {
+        const val DEFAULT_SCALE = 1f
+        const val MIN_SCALE = 0.4f
+        const val MAX_SCALE = 4f
+    }
+}
+
 @Serializable
 data class EmulationSettings(
     // How the emulation screen is allowed to rotate. Games run full screen, so this is what
@@ -38,6 +59,9 @@ data class EmulationSettings(
     // values, like the rest of the display settings.
     val customScreensLayoutPortrait: CustomScreensLayout? = null,
     val customScreensLayoutLandscape: CustomScreensLayout? = null,
+    // Wallpaper of the area around the screens, kept per orientation like the layout.
+    val backgroundPortrait: ScreenBackground = ScreenBackground(),
+    val backgroundLandscape: ScreenBackground = ScreenBackground(),
     val isPadOnExternalDisplay: Boolean = false,
     val isExternalScreenRotatedLeft: Boolean = false,
     // Fast forward multiplier and slow motion divisor picked in the side menu. The on/off state
@@ -72,6 +96,9 @@ data class PerGameDisplaySettings(
     // Per-game override for the numeric screen layout, one value per orientation.
     val customScreensLayoutPortrait: CustomScreensLayout? = null,
     val customScreensLayoutLandscape: CustomScreensLayout? = null,
+    // A per-game wallpaper keeps each game's choice independent; null uses the global one.
+    val backgroundPortrait: ScreenBackground? = null,
+    val backgroundLandscape: ScreenBackground? = null,
 )
 
 @Serializable

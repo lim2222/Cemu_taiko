@@ -4,6 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.PorterDuff
 import android.graphics.Rect
 import android.os.SystemClock
 import android.os.VibrationEffect
@@ -24,7 +27,9 @@ import info.cemu.cemu.common.settings.InputOverlayRect
 import info.cemu.cemu.common.settings.InputOverlaySettings
 import info.cemu.cemu.common.settings.InputOverlaySlideMode
 import info.cemu.cemu.common.settings.OverlayInputConfig
+import info.cemu.cemu.common.settings.ScreenBackground
 import info.cemu.cemu.common.settings.getDefaultRectangle
+import info.cemu.cemu.emulation.EmulationBackgroundRenderer
 import info.cemu.cemu.emulation.EmulationPauseState
 import info.cemu.cemu.emulation.EmulationSpeedState
 import info.cemu.cemu.emulation.inputoverlay.inputs.ActionButton
@@ -60,6 +65,8 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     var onMenuRequested: () -> Unit = {}
 
     private var inputMode = InputMode.DEFAULT
+    private val backgroundRenderer = EmulationBackgroundRenderer()
+    private var areButtonsVisible = true
     private var pixelDensity = 1
     private var currentConfiguredInput: Input? = null
     // Offset between the finger and the input center when the drag started, so the input does not
@@ -137,6 +144,9 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
         // Stay behind the parent window, but above the emulation SurfaceViews. This keeps the
         // buttons visible even when a rendering screen is translucent.
         setZOrderMediaOverlay(true)
+        // The wallpaper has holes where the games are; those pixels must let the surfaces behind
+        // through instead of staying black or keeping a frame from a previous layout.
+        holder.setFormat(PixelFormat.TRANSPARENT)
         visibility = GONE
 
         pixelDensity = context.resources.displayMetrics.densityDpi
@@ -172,6 +182,24 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
 
         visibility = if (isVisible) VISIBLE else GONE
 
+        invalidate()
+    }
+
+    fun setButtonsVisible(visible: Boolean) {
+        if (areButtonsVisible == visible) return
+        if (!visible) releaseAllButtons()
+        areButtonsVisible = visible
+        invalidate()
+    }
+
+    fun setBackground(bitmap: Bitmap?, transform: ScreenBackground, holes: List<Rect>) {
+        val changed = backgroundRenderer.bitmap !== bitmap ||
+            backgroundRenderer.transform != transform ||
+            backgroundRenderer.holes != holes
+        if (!changed) return
+        backgroundRenderer.bitmap = bitmap
+        backgroundRenderer.transform = transform
+        backgroundRenderer.holes = holes
         invalidate()
     }
 
@@ -810,10 +838,14 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     }
 
     override fun draw(canvas: Canvas) {
+        canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
         super.draw(canvas)
 
-        for ((_, input) in inputs) {
-            input.draw(canvas)
+        backgroundRenderer.draw(canvas, width, height)
+        if (areButtonsVisible) {
+            for ((_, input) in inputs) {
+                input.draw(canvas)
+            }
         }
     }
 
@@ -911,6 +943,10 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
     }
 
     override fun onTouch(v: View, event: MotionEvent): Boolean {
+        // A wallpaper-only overlay must not swallow touches meant for the rendering surfaces.
+        if (!areButtonsVisible && inputMode == InputMode.DEFAULT) {
+            return false
+        }
         var touchEventProcessed = false
         when (inputMode) {
             InputMode.DEFAULT -> {
@@ -1112,6 +1148,10 @@ class InputOverlaySurfaceView(context: Context) : SurfaceView(context), OnTouchL
 @Composable
 fun InputOverlaySurface(
     isVisible: Boolean,
+    areButtonsVisible: Boolean,
+    backgroundBitmap: Bitmap?,
+    backgroundTransform: ScreenBackground,
+    backgroundHoles: List<Rect>,
     inputOverlaySettings: InputOverlaySettings,
     controllerType: Int,
     inputMode: InputOverlaySurfaceView.InputMode,
@@ -1123,6 +1163,8 @@ fun InputOverlaySurface(
         factory = { context ->
             InputOverlaySurfaceView(context).apply {
                 setVisible(isVisible)
+                setButtonsVisible(areButtonsVisible)
+                setBackground(backgroundBitmap, backgroundTransform, backgroundHoles)
                 setInputMode(inputMode)
                 applySettings(inputOverlaySettings, controllerType)
                 onEditFinishedListener = onEditFinished
@@ -1131,6 +1173,8 @@ fun InputOverlaySurface(
         },
         update = { view ->
             view.setVisible(isVisible)
+            view.setButtonsVisible(areButtonsVisible)
+            view.setBackground(backgroundBitmap, backgroundTransform, backgroundHoles)
             view.setInputMode(inputMode)
             view.applySettings(inputOverlaySettings, controllerType)
             view.onEditFinishedListener = onEditFinished

@@ -25,6 +25,7 @@ import info.cemu.cemu.common.settings.InputOverlaySettings
 import info.cemu.cemu.common.settings.InputOverlaySlideMode
 import info.cemu.cemu.common.settings.OverlayInputConfig
 import info.cemu.cemu.common.settings.PerGameDisplaySettings
+import info.cemu.cemu.common.settings.ScreenBackground
 import info.cemu.cemu.common.settings.ScreenOrientationMode
 import info.cemu.cemu.common.settings.ScreenRect
 import info.cemu.cemu.common.settings.ScreensLayout
@@ -419,6 +420,13 @@ class EmulationViewModel(
         updatePerGameDisplaySettings {
             if (isPortrait) it.copy(customScreensLayoutPortrait = layout)
             else it.copy(customScreensLayoutLandscape = layout)
+        }
+    }
+
+    fun setBackground(isPortrait: Boolean, background: ScreenBackground) {
+        updatePerGameDisplaySettings {
+            if (isPortrait) it.copy(backgroundPortrait = background)
+            else it.copy(backgroundLandscape = background)
         }
     }
 
